@@ -107,7 +107,7 @@ namespace WebApi.Controllers
                         c.Latitude,
                         c.Longitude
                     })
-                    .Take(2000)
+                    .Take(8000)
                     .ToListAsync();
 
                 return Ok(data);

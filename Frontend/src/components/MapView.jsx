@@ -1,406 +1,774 @@
-import { useEffect, useMemo, useRef } from 'react';
-import maplibregl from 'maplibre-gl';
-import 'maplibre-gl/dist/maplibre-gl.css';
-import { motion } from 'framer-motion';
-import { useStore } from '../store/useStore.js';
-import { buildFeatureCollection, buildNearbyCircleGeoJson, buildNearbyGeoJson } from '../utils/geo.js';
+import { useEffect, useRef } from 'react'
+import maplibregl from 'maplibre-gl'
+import { useMapStore } from '../store/useMapStore'
+import { fetchNearby } from '../hooks/useBuildings'
+import { makeCircleGeoJSON, RATING_COLORS } from '../utils/geoUtils'
 import {
-  DEFAULT_CENTER,
-  DEFAULT_RADIUS,
-  DEFAULT_ZOOM,
-  LAYER_IDS,
-  MAP_STYLE_URL,
-  SOURCE_IDS
-} from '../utils/constants.js';
-import '../styles/map-view.css';
+  SOURCE_CONFIG,
+  HEATMAP_LAYER,
+  CLUSTER_LAYER,
+  CLUSTER_COUNT_LAYER,
+  POINT_LAYER,
+  POINT_HIGHLIGHT_LAYER,
+  NEARBY_CIRCLE_LAYER,
+  NEARBY_CIRCLE_STROKE_LAYER,
+  NEARBY_RESULTS_LAYER,
+  SEARCH_RESULT_LAYER,
+} from '../utils/layers'
 
-function popupHtml(properties) {
-  return `
-    <div class="popup-card">
-      <div class="popup-kicker">Building insight</div>
-      <div class="popup-title">${properties.adresse || 'Unknown address'}</div>
-      <div class="popup-subtitle">${properties.kommunenavn || 'Unknown municipality'}</div>
-      <div class="popup-grid">
-        <div class="popup-metric"><span>Energy grade</span><strong>${properties.energikarakter || 'N/A'}</strong></div>
-        <div class="popup-metric"><span>Heat grade</span><strong>${properties.oppvarmingskarakter || 'N/A'}</strong></div>
-        <div class="popup-metric"><span>kWh/m2</span><strong>${properties.energibruk_kwh_m2 ?? 'N/A'}</strong></div>
-        <div class="popup-metric"><span>Build year</span><strong>${properties.byggeaar ?? 'N/A'}</strong></div>
-      </div>
-    </div>
-  `;
+/**
+ * Converts any building-like object into a valid GeoJSON Feature.
+ * Handles proper GeoJSON, flat {latitude,longitude} objects, and mixed shapes.
+ */
+function normalizeToGeoJSONFeature(item) {
+  if (!item) return null
+
+  if (
+    item.type === 'Feature' &&
+    item.geometry?.type === 'Point' &&
+    Array.isArray(item.geometry.coordinates) &&
+    item.geometry.coordinates.length >= 2
+  ) return item
+
+  const props = item.properties ?? item
+  const lng = item.longitude ?? item.lon ?? item.lng ?? props.longitude ?? props.lon ?? props.lng
+  const lat = item.latitude ?? item.lat ?? props.latitude ?? props.lat
+
+  if (lng == null || lat == null) return null
+  const coords = [parseFloat(lng), parseFloat(lat)]
+  if (isNaN(coords[0]) || isNaN(coords[1])) return null
+
+  const mergedProps = { ...props }
+  delete mergedProps.geometry
+  delete mergedProps.type
+
+  return { type: 'Feature', geometry: { type: 'Point', coordinates: coords }, properties: mergedProps }
 }
 
-function nearbyPopupHtml(properties) {
-  return `
-    <div class="popup-card popup-card-small">
-      <div class="popup-kicker">Nearby result</div>
-      <div class="popup-title">Coordinate #${properties.coordinateid}</div>
-      <div class="popup-subtitle">Lat ${properties.latitude}, Lng ${properties.longitude}</div>
-    </div>
-  `;
+/**
+ * The /nearby endpoint returns only { coordinateid, latitude, longitude }.
+ * We enrich each result by matching its coordinates against the already-loaded
+ * allFeatures (full building data with address, energy rating, etc.).
+ *
+ * Uses a pre-built coordinate lookup Map for O(1) matching.
+ * Coordinates are rounded to 5 decimal places (~1m precision) for the key.
+ */
+function buildCoordLookup(allFeatures) {
+  const map = new Map()
+  for (const f of allFeatures) {
+    if (!f.geometry?.coordinates) continue
+    const [lng, lat] = f.geometry.coordinates
+    const key = `${parseFloat(lat).toFixed(5)}_${parseFloat(lng).toFixed(5)}`
+    map.set(key, f)
+  }
+  return map
 }
 
-function MapLegend() {
-  const viewMode = useStore((state) => state.viewMode);
+function findNearestBuilding(lat, lng, allFeatures, maxDistanceMeters = 15) {
+  let nearest = null
+  let bestDistanceSq = Infinity
 
-  return (
-    <div className="map-legend">
-      <div className="legend-kicker">Legend</div>
-      {viewMode === 'heatmap' ? (
-        <>
-          <div className="legend-gradient" />
-          <div className="legend-scale">
-            <span>Low usage</span>
-            <span>High usage</span>
+  const latNum = parseFloat(lat)
+  const lngNum = parseFloat(lng)
+  if (isNaN(latNum) || isNaN(lngNum)) return null
+
+  const metersPerLatDegree = 111_320
+  const metersPerLngDegree = 111_320 * Math.cos((latNum * Math.PI) / 180)
+
+  for (const feature of allFeatures) {
+    const coords = feature.geometry?.coordinates
+    if (!Array.isArray(coords) || coords.length < 2) continue
+
+    const [featureLng, featureLat] = coords
+    const dx = (parseFloat(featureLng) - lngNum) * metersPerLngDegree
+    const dy = (parseFloat(featureLat) - latNum) * metersPerLatDegree
+    const distanceSq = dx * dx + dy * dy
+
+    if (distanceSq < bestDistanceSq) {
+      bestDistanceSq = distanceSq
+      nearest = feature
+    }
+  }
+
+  return bestDistanceSq <= maxDistanceMeters * maxDistanceMeters ? nearest : null
+}
+
+function enrichNearbyWithBuildings(nearbyRaw, allFeatures) {
+  const lookup = buildCoordLookup(allFeatures)
+  return nearbyRaw
+    .map(item => {
+      const lat = item.latitude ?? item.lat
+      const lng = item.longitude ?? item.lon ?? item.lng
+      if (lat == null || lng == null) return null
+
+      const key = `${parseFloat(lat).toFixed(5)}_${parseFloat(lng).toFixed(5)}`
+      const matched = lookup.get(key) ?? findNearestBuilding(lat, lng, allFeatures)
+
+      return matched ?? {
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [parseFloat(lng), parseFloat(lat)] },
+        properties: { coordinateid: item.coordinateid },
+      }
+    })
+    .filter(Boolean)
+}
+
+function lngLatToWebMercatorMeters(lng, lat) {
+  const originShift = 20037508.34
+  const x = (lng * originShift) / 180
+  const y = Math.log(Math.tan(((90 + lat) * Math.PI) / 360)) / (Math.PI / 180)
+  return {
+    x,
+    y: (y * originShift) / 180,
+  }
+}
+
+function webMercatorMetersToLngLat(x, y) {
+  const originShift = 20037508.34
+  const lng = (x / originShift) * 180
+  const lat = (y / originShift) * 180
+  return {
+    lng,
+    lat: (180 / Math.PI) * (2 * Math.atan(Math.exp((lat * Math.PI) / 180)) - Math.PI / 2),
+  }
+}
+
+function toEnergyWeight(avgEnergy) {
+  if (avgEnergy == null || Number.isNaN(Number(avgEnergy))) return 0
+  const energy = Number(avgEnergy)
+  if (energy <= 0) return 0
+  if (energy <= 150) return (energy / 150) * 0.25
+  if (energy <= 250) return 0.25 + ((energy - 150) / 100) * 0.3
+  if (energy <= 300) return 0.55 + ((energy - 250) / 50) * 0.45
+  return 1
+}
+
+function toBadGradeWeight({ addressCount, badCount, severeCount }) {
+  if (!addressCount || badCount <= 0) return 0
+
+  const badShare = badCount / addressCount
+  const severeShare = severeCount / addressCount
+
+  // Buildings with many bad addresses should stand out even if nearby
+  // averages dilute them. Count + share + severe grades all matter.
+  return Math.min(
+    1,
+    badShare * 0.6 +
+    severeShare * 0.5 +
+    Math.min(0.35, badCount * 0.1) +
+    Math.min(0.25, severeCount * 0.08)
+  )
+}
+
+function buildPerBuildingAverageFeatures(features) {
+  const buildings = new Map()
+
+  for (const feature of features) {
+    const coords = feature.geometry?.coordinates
+    if (!Array.isArray(coords) || coords.length < 2) continue
+
+    const [lng, lat] = coords
+    const energy = feature.properties?.energibruk_kwh_m2
+    if (energy == null || Number.isNaN(Number(energy))) continue
+
+    const buildingId = feature.properties?.bygningsnummer
+    if (!buildingId) {
+      buildings.set(Symbol('building'), {
+        lngSum: Number(lng),
+        latSum: Number(lat),
+        energySum: Number(energy),
+        count: 1,
+        badCount: ['E', 'F', 'G'].includes(feature.properties?.energikarakter) ? 1 : 0,
+        severeCount: ['F', 'G'].includes(feature.properties?.energikarakter) ? 1 : 0,
+      })
+      continue
+    }
+
+    const existing = buildings.get(buildingId) ?? {
+      lngSum: 0,
+      latSum: 0,
+      energySum: 0,
+      count: 0,
+      badCount: 0,
+      severeCount: 0,
+    }
+
+    existing.lngSum += Number(lng)
+    existing.latSum += Number(lat)
+    existing.energySum += Number(energy)
+    existing.count += 1
+    if (['E', 'F', 'G'].includes(feature.properties?.energikarakter)) existing.badCount += 1
+    if (['F', 'G'].includes(feature.properties?.energikarakter)) existing.severeCount += 1
+    buildings.set(buildingId, existing)
+  }
+
+  return Array.from(buildings.values()).map(building => {
+    const avgEnergy = building.energySum / building.count
+    const energyWeight = toEnergyWeight(avgEnergy)
+    const badGradeWeight = toBadGradeWeight({
+      addressCount: building.count,
+      badCount: building.badCount,
+      severeCount: building.severeCount,
+    })
+
+    return {
+      type: 'Feature',
+      geometry: {
+        type: 'Point',
+        coordinates: [building.lngSum / building.count, building.latSum / building.count],
+      },
+      properties: {
+        avg_energibruk_kwh_m2: avgEnergy,
+        address_count: building.count,
+        bad_grade_count: building.badCount,
+        severe_bad_grade_count: building.severeCount,
+        heatmap_weight: Math.max(energyWeight, badGradeWeight),
+      },
+    }
+  })
+}
+
+function buildAverageHeatmapFeatures(features, cellSizeMeters = 300) {
+  const buildingFeatures = buildPerBuildingAverageFeatures(features)
+  const cells = new Map()
+
+  for (const feature of buildingFeatures) {
+    const coords = feature.geometry?.coordinates
+    if (!Array.isArray(coords) || coords.length < 2) continue
+
+    const [lng, lat] = coords
+    const energy = feature.properties?.avg_energibruk_kwh_m2
+    const weight = feature.properties?.heatmap_weight ?? 0
+    if (energy == null || Number.isNaN(Number(energy))) continue
+
+    const point = lngLatToWebMercatorMeters(Number(lng), Number(lat))
+    const cellX = Math.floor(point.x / cellSizeMeters)
+    const cellY = Math.floor(point.y / cellSizeMeters)
+    const key = `${cellX}:${cellY}`
+
+    const existing = cells.get(key) ?? {
+      sumEnergy: 0,
+      count: 0,
+      maxWeight: 0,
+      centerX: (cellX + 0.5) * cellSizeMeters,
+      centerY: (cellY + 0.5) * cellSizeMeters,
+    }
+
+    existing.sumEnergy += Number(energy)
+    existing.count += 1
+    existing.maxWeight = Math.max(existing.maxWeight, Number(weight) || 0)
+    cells.set(key, existing)
+  }
+
+  return Array.from(cells.values()).map(cell => {
+    const center = webMercatorMetersToLngLat(cell.centerX, cell.centerY)
+    return {
+      type: 'Feature',
+      geometry: {
+        type: 'Point',
+        coordinates: [center.lng, center.lat],
+      },
+      properties: {
+        avg_energibruk_kwh_m2: cell.sumEnergy / cell.count,
+        building_count: cell.count,
+        heatmap_weight: cell.maxWeight,
+      },
+    }
+  })
+}
+
+function applyBuildingSelection(map, feature, selectBuilding) {
+  if (!feature?.properties) return
+
+  selectBuilding(feature.properties)
+
+  if (feature.source === 'buildings' && feature.id != null) {
+    map.setFilter('buildings-point-highlight', ['==', ['id'], feature.id])
+    return
+  }
+
+  map.setFilter('buildings-point-highlight', ['==', ['id'], -1])
+}
+
+function buildSearchPopupHtml(properties) {
+  const p = properties ?? {}
+  const rating = p.energikarakter
+  const color = rating ? RATING_COLORS[rating] : '#4a5875'
+  const energy = p.energibruk_kwh_m2 != null ? `${Math.round(p.energibruk_kwh_m2)} kWh/mÂ²` : 'â€”'
+
+  return `
+    <div style="font-family:'DM Sans',sans-serif; min-width:200px;">
+      <div style="
+        display:flex; align-items:center; gap:10px;
+        padding-bottom:10px; margin-bottom:10px;
+        border-bottom:1px solid #1e2638;
+      ">
+        ${rating ? `
+          <div style="
+            width:36px; height:36px; border-radius:6px; flex-shrink:0;
+            background:${color}22; border:1px solid ${color};
+            display:flex; align-items:center; justify-content:center;
+            font-family:'Syne',sans-serif; font-weight:800; font-size:18px; color:${color};
+          ">${rating}</div>
+        ` : ''}
+        <div>
+          <div style="font-size:13px; font-weight:600; color:#e4eaf6; line-height:1.3;">
+            ${p.adresse ?? p.poststed ?? 'Ukjent adresse'}
           </div>
-          <div className="legend-copy">Heatmap intensity is based on energibruk_kwh_m2.</div>
-        </>
-      ) : (
-        <div className="legend-list">
-          <div className="legend-item"><span className="legend-dot dot-cluster" />Clustered buildings</div>
-          <div className="legend-item"><span className="legend-dot dot-building" />Individual building</div>
-          <div className="legend-item"><span className="legend-dot dot-nearby" />Nearby results</div>
+          <div style="font-size:11px; color:#7a8cad; margin-top:2px;">
+            ${[p.poststed, p.kommunenavn].filter(Boolean).join(' Â· ')}
+          </div>
         </div>
-      )}
+      </div>
+
+      <div style="display:grid; gap:6px; font-size:11px;">
+        <div style="display:flex; justify-content:space-between;">
+          <span style="color:#4a5875;">Energibruk</span>
+          <span style="color:${color}; font-weight:600;">${energy}</span>
+        </div>
+        ${p.byggeaar ? `
+          <div style="display:flex; justify-content:space-between;">
+            <span style="color:#4a5875;">Byggeår</span>
+            <span style="color:#e4eaf6;">${p.byggeaar}</span>
+          </div>
+        ` : ''}
+        ${p.bygningskategori ? `
+          <div style="display:flex; justify-content:space-between;">
+            <span style="color:#4a5875;">Kategori</span>
+            <span style="color:#e4eaf6;">${p.bygningskategori}</span>
+          </div>
+        ` : ''}
+        ${p.bygningsnummer ? `
+          <div style="display:flex; justify-content:space-between;">
+            <span style="color:#4a5875;">Bygningsnr.</span>
+            <span style="color:#e4eaf6;">${p.bygningsnummer}</span>
+          </div>
+        ` : ''}
+      </div>
+
+      <button
+        onclick="window.__byggSelectBuilding()"
+        style="
+          margin-top:12px; width:100%; padding:8px;
+          background:#ff8c4222; border:1px solid #ff8c42;
+          border-radius:6px; color:#ff8c42;
+          font-family:'Syne',sans-serif; font-size:11px; font-weight:600;
+          letter-spacing:0.08em; text-transform:uppercase; cursor:pointer;
+        "
+      >
+        Vis alle detaljer â†’
+      </button>
     </div>
-  );
+  `
 }
 
-function addMapLayers(map) {
-  map.addSource(SOURCE_IDS.buildings, {
-    type: 'geojson',
-    data: buildFeatureCollection([]),
-    cluster: true,
-    clusterRadius: 50,
-    clusterMaxZoom: 13
-  });
+function openSearchResultPopup(map, feature, searchPopupRef, selectBuilding, clearSearchResult) {
+  if (!feature?.geometry?.coordinates) return
 
-  map.addLayer({
-    id: LAYER_IDS.clusters,
-    type: 'circle',
-    source: SOURCE_IDS.buildings,
-    filter: ['has', 'point_count'],
-    paint: {
-      'circle-color': ['step', ['get', 'point_count'], '#0ea5e9', 25, '#14b8a6', 100, '#f97316'],
-      'circle-radius': ['step', ['get', 'point_count'], 18, 25, 26, 100, 34],
-      'circle-opacity': 0.88,
-      'circle-stroke-width': 2,
-      'circle-stroke-color': '#f8fafc'
-    }
-  });
+  if (searchPopupRef.current) {
+    searchPopupRef.current.remove()
+    searchPopupRef.current = null
+  }
 
-  map.addLayer({
-    id: LAYER_IDS.clusterCount,
-    type: 'symbol',
-    source: SOURCE_IDS.buildings,
-    filter: ['has', 'point_count'],
-    layout: {
-      'text-field': ['get', 'point_count_abbreviated'],
-      'text-font': ['Open Sans Bold'],
-      'text-size': 12
-    },
-    paint: {
-      'text-color': '#ffffff'
-    }
-  });
+  const [lng, lat] = feature.geometry.coordinates
+  const p = feature.properties ?? {}
 
-  map.addLayer({
-    id: LAYER_IDS.points,
-    type: 'circle',
-    source: SOURCE_IDS.buildings,
-    filter: ['!', ['has', 'point_count']],
-    paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 5, 12, 9],
-      'circle-color': '#0f9d8a',
-      'circle-stroke-color': '#ecfeff',
-      'circle-stroke-width': 1.5,
-      'circle-opacity': 0.9
+  window.__byggSelectBuilding = () => {
+    selectBuilding(p)
+    if (searchPopupRef.current) {
+      searchPopupRef.current.remove()
+      searchPopupRef.current = null
     }
-  });
+    clearSearchResult()
+  }
 
-  map.addLayer({
-    id: LAYER_IDS.heatmap,
-    type: 'heatmap',
-    source: SOURCE_IDS.buildings,
-    maxzoom: 15,
-    layout: { visibility: 'none' },
-    paint: {
-      'heatmap-weight': ['interpolate', ['linear'], ['coalesce', ['get', 'energibruk_kwh_m2'], 0], 0, 0, 50, 0.3, 150, 0.7, 400, 1],
-      'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 5, 0.5, 9, 1.2, 13, 1.8],
-      'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'], 0, 'rgba(15,23,42,0)', 0.15, '#1d4ed8', 0.35, '#14b8a6', 0.55, '#fde047', 0.75, '#fb923c', 1, '#dc2626'],
-      'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 4, 10, 8, 26, 13, 42],
-      'heatmap-opacity': 0.85
-    }
-  });
+  const popup = new maplibregl.Popup({
+    maxWidth: '300px',
+    closeButton: true,
+    closeOnClick: false,
+    className: 'bygg-popup',
+  })
+    .setLngLat([lng, lat])
+    .setHTML(buildSearchPopupHtml(p))
+    .addTo(map)
 
-  map.addSource(SOURCE_IDS.selected, { type: 'geojson', data: buildFeatureCollection([]) });
-  map.addLayer({
-    id: LAYER_IDS.selectedHalo,
-    type: 'circle',
-    source: SOURCE_IDS.selected,
-    paint: {
-      'circle-radius': 18,
-      'circle-color': 'rgba(250, 204, 21, 0.18)',
-      'circle-stroke-color': '#facc15',
-      'circle-stroke-width': 3
-    }
-  });
-  map.addLayer({
-    id: LAYER_IDS.selectedPoint,
-    type: 'circle',
-    source: SOURCE_IDS.selected,
-    paint: {
-      'circle-radius': 7,
-      'circle-color': '#facc15',
-      'circle-stroke-color': '#0f172a',
-      'circle-stroke-width': 2
-    }
-  });
+  popup.on('close', () => {
+    searchPopupRef.current = null
+  })
 
-  map.addSource(SOURCE_IDS.nearby, { type: 'geojson', data: buildFeatureCollection([]) });
-  map.addLayer({
-    id: LAYER_IDS.nearby,
-    type: 'circle',
-    source: SOURCE_IDS.nearby,
-    paint: {
-      'circle-radius': 6,
-      'circle-color': '#f97316',
-      'circle-stroke-color': '#fff7ed',
-      'circle-stroke-width': 2
-    }
-  });
-
-  map.addSource(SOURCE_IDS.nearbyCircle, { type: 'geojson', data: buildFeatureCollection([]) });
-  map.addLayer({
-    id: LAYER_IDS.nearbyCircle,
-    type: 'fill',
-    source: SOURCE_IDS.nearbyCircle,
-    paint: {
-      'fill-color': '#f97316',
-      'fill-opacity': 0.12,
-      'fill-outline-color': '#fb923c'
-    }
-  });
+  searchPopupRef.current = popup
 }
 
-function MapView({ features, allFeaturesCount, selectedFeature, nearbyState, onMapClick, isSearchingNearby }) {
-  const mapContainerRef = useRef(null);
-  const mapRef = useRef(null);
-  const popupRef = useRef(null);
-  const featuresRef = useRef(features);
-  const mapClickRef = useRef(onMapClick);
-  const hasFittedRef = useRef(false);
-  const viewMode = useStore((state) => state.viewMode);
-  const setSelectedFeature = useStore((state) => state.setSelectedFeature);
-  const featureCollection = useMemo(() => buildFeatureCollection(features), [features]);
-  const nearbyCollection = useMemo(() => buildNearbyGeoJson(nearbyState.results), [nearbyState.results]);
-  const nearbyCircleCollection = useMemo(() => {
-    if (!nearbyState.center) return buildFeatureCollection([]);
-    return buildNearbyCircleGeoJson(
-      nearbyState.center.longitude,
-      nearbyState.center.latitude,
-      nearbyState.radiusInMeters
-    );
-  }, [nearbyState.center, nearbyState.radiusInMeters]);
-  const featureCollectionRef = useRef(featureCollection);
-  const nearbyCollectionRef = useRef(nearbyCollection);
-  const nearbyCircleCollectionRef = useRef(nearbyCircleCollection);
-  const selectedFeatureRef = useRef(selectedFeature);
-  const viewModeRef = useRef(viewMode);
+function openBuildingChoicePopup(map, features, popupRef, selectBuilding) {
+  const validFeatures = (features ?? []).filter(f => f?.properties && f?.geometry?.coordinates)
+  if (!validFeatures.length) return
+
+  if (popupRef.current) {
+    popupRef.current.remove()
+    popupRef.current = null
+  }
+
+  const [lng, lat] = validFeatures[0].geometry.coordinates
+  window.__byggFeatureChoices = validFeatures
+  window.__byggPickFeature = (index) => {
+    const chosen = window.__byggFeatureChoices?.[index]
+    if (!chosen) return
+    applyBuildingSelection(map, chosen, selectBuilding)
+    if (popupRef.current) {
+      popupRef.current.remove()
+      popupRef.current = null
+    }
+  }
+
+  const itemsHtml = validFeatures.map((feature, index) => {
+    const p = feature.properties ?? {}
+    const title = p.adresse ?? p.poststed ?? `Bygg ${index + 1}`
+    const meta = [
+      p.bygningsnummer ? `Bygningsnr. ${p.bygningsnummer}` : null,
+      p.bygningskategori ?? null,
+      p.byggeaar ? String(p.byggeaar) : null,
+    ].filter(Boolean).join(' · ')
+
+    return `
+      <button
+        onclick="window.__byggPickFeature(${index})"
+        style="
+          display:block; width:100%; text-align:left; cursor:pointer;
+          background:#111827; border:1px solid #263041; border-radius:8px;
+          padding:10px; margin-top:${index === 0 ? 0 : 8}px;
+        "
+      >
+        <div style="font-size:12px; font-weight:600; color:#e4eaf6;">${title}</div>
+        ${meta ? `<div style="font-size:10px; color:#7a8cad; margin-top:3px;">${meta}</div>` : ''}
+      </button>
+    `
+  }).join('')
+
+  const popup = new maplibregl.Popup({
+    maxWidth: '320px',
+    closeButton: true,
+    closeOnClick: false,
+    className: 'bygg-popup',
+  })
+    .setLngLat([lng, lat])
+    .setHTML(`
+      <div style="font-family:'DM Sans',sans-serif; min-width:220px;">
+        <div style="font-size:12px; font-weight:700; color:#e4eaf6; margin-bottom:10px;">
+          Velg bygg (${validFeatures.length})
+        </div>
+        <div style="max-height:260px; overflow-y:auto; padding-right:4px;">
+          ${itemsHtml}
+        </div>
+      </div>
+    `)
+    .addTo(map)
+
+  popup.on('close', () => {
+    popupRef.current = null
+  })
+
+  popupRef.current = popup
+}
+
+const MAP_STYLES = {
+  dark: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+  light: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
+}
+const INITIAL_CENTER = [10.75, 59.91]
+const INITIAL_ZOOM = 6
+
+export default function MapView({ mapRef, theme = 'dark' }) {
+  const containerRef = useRef(null)
+  const _mapRef = useRef(null)
+  const searchPopupRef = useRef(null)
+
+  const filteredFeatures = useMapStore(s => s.filteredFeatures)
+  const allFeatures = useMapStore(s => s.allFeatures)
+  const searchResult = useMapStore(s => s.searchResult)
+  const nearbyActive = useMapStore(s => s.nearbyActive)
+  const nearbyCircle = useMapStore(s => s.nearbyCircle)
+  const nearbyResults = useMapStore(s => s.nearbyResults)
+  const setZoom = useMapStore(s => s.setZoom)
+  const setNearbyCircle = useMapStore(s => s.setNearbyCircle)
+  const setNearbyResults = useMapStore(s => s.setNearbyResults)
+  const selectBuilding = useMapStore(s => s.selectBuilding)
+  const clearSearchResult = useMapStore(s => s.clearSearchResult)
 
   useEffect(() => {
-    featuresRef.current = features;
-  }, [features]);
-
-  useEffect(() => {
-    featureCollectionRef.current = featureCollection;
-  }, [featureCollection]);
-
-  useEffect(() => {
-    nearbyCollectionRef.current = nearbyCollection;
-  }, [nearbyCollection]);
-
-  useEffect(() => {
-    nearbyCircleCollectionRef.current = nearbyCircleCollection;
-  }, [nearbyCircleCollection]);
-
-  useEffect(() => {
-    selectedFeatureRef.current = selectedFeature;
-  }, [selectedFeature]);
-
-  useEffect(() => {
-    mapClickRef.current = onMapClick;
-  }, [onMapClick]);
-
-  useEffect(() => {
-    viewModeRef.current = viewMode;
-  }, [viewMode]);
-
-  useEffect(() => {
-    if (mapRef.current || !mapContainerRef.current) return undefined;
+    if (_mapRef.current) return
 
     const map = new maplibregl.Map({
-      container: mapContainerRef.current,
-      style: MAP_STYLE_URL,
-      center: DEFAULT_CENTER,
-      zoom: DEFAULT_ZOOM,
-      attributionControl: false
-    });
+      container: containerRef.current,
+      style: MAP_STYLES[theme] ?? MAP_STYLES.dark,
+      center: INITIAL_CENTER,
+      zoom: INITIAL_ZOOM,
+      minZoom: 4,
+      maxZoom: 20,
+      antialias: true,
+      fadeDuration: 150,
+    })
 
-    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
+    _mapRef.current = map
+    if (mapRef) mapRef.current = map
+
+    map.addControl(new maplibregl.NavigationControl(), 'bottom-right')
+
+    map.on('error', (e) => {
+      console.error('MapLibre error:', e.error)
+    })
 
     map.on('load', () => {
-      addMapLayers(map);
-      map.getSource(SOURCE_IDS.buildings).setData(featureCollectionRef.current);
-      map.getSource(SOURCE_IDS.nearby).setData(nearbyCollectionRef.current);
-      map.getSource(SOURCE_IDS.nearbyCircle).setData(nearbyCircleCollectionRef.current);
+      map.addSource('buildings', SOURCE_CONFIG)
 
-      const markerVisibility = viewModeRef.current === 'markers' ? 'visible' : 'none';
-      const heatmapVisibility = viewModeRef.current === 'heatmap' ? 'visible' : 'none';
-      map.setLayoutProperty(LAYER_IDS.clusters, 'visibility', markerVisibility);
-      map.setLayoutProperty(LAYER_IDS.clusterCount, 'visibility', markerVisibility);
-      map.setLayoutProperty(LAYER_IDS.points, 'visibility', markerVisibility);
-      map.setLayoutProperty(LAYER_IDS.heatmap, 'visibility', heatmapVisibility);
+      map.addSource('heatmap-buildings', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      })
 
-      if (selectedFeatureRef.current) {
-        map.getSource(SOURCE_IDS.selected).setData(
-          buildFeatureCollection([selectedFeatureRef.current])
-        );
+      map.addSource('nearby-circle', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      })
+
+      map.addSource('nearby-results', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      })
+
+      map.addSource('search-result', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      })
+
+      map.addLayer(HEATMAP_LAYER)
+      map.addLayer(CLUSTER_LAYER)
+      map.addLayer(CLUSTER_COUNT_LAYER)
+      map.addLayer(POINT_LAYER)
+      map.addLayer(POINT_HIGHLIGHT_LAYER)
+      map.addLayer(NEARBY_CIRCLE_LAYER)
+      map.addLayer(NEARBY_CIRCLE_STROKE_LAYER)
+      map.addLayer(NEARBY_RESULTS_LAYER)
+      map.addLayer(SEARCH_RESULT_LAYER)
+
+      const initialFeatures = useMapStore.getState().filteredFeatures
+      const initialData = {
+        type: 'FeatureCollection',
+        features: initialFeatures,
+      }
+      const initialHeatmapData = {
+        type: 'FeatureCollection',
+        features: buildAverageHeatmapFeatures(initialFeatures),
       }
 
-      map.on('click', LAYER_IDS.clusters, (event) => {
-        const clusterFeature = map.queryRenderedFeatures(event.point, { layers: [LAYER_IDS.clusters] })[0];
-        const clusterId = clusterFeature.properties.cluster_id;
-        map.getSource(SOURCE_IDS.buildings).getClusterExpansionZoom(clusterId, (error, zoom) => {
-          if (!error) map.easeTo({ center: clusterFeature.geometry.coordinates, zoom });
-        });
-      });
+      map.getSource('buildings').setData(initialData)
+      map.getSource('heatmap-buildings').setData(initialHeatmapData)
 
-      map.on('click', LAYER_IDS.points, (event) => {
-        const feature = event.features?.[0];
-        if (!feature) return;
-        const selected = featuresRef.current.find((item) => item.id === feature.properties.id);
-        setSelectedFeature(selected || null);
-        popupRef.current?.remove();
-        popupRef.current = new maplibregl.Popup({ closeButton: false, offset: 16 })
-          .setLngLat(feature.geometry.coordinates.slice())
-          .setHTML(popupHtml(feature.properties))
-          .addTo(map);
-      });
+      map.on('zoom', () => setZoom(map.getZoom()))
 
-      map.on('click', LAYER_IDS.nearby, (event) => {
-        const feature = event.features?.[0];
-        if (!feature) return;
-        popupRef.current?.remove();
-        popupRef.current = new maplibregl.Popup({ closeButton: false, offset: 12 })
-          .setLngLat(feature.geometry.coordinates.slice())
-          .setHTML(nearbyPopupHtml(feature.properties))
-          .addTo(map);
-      });
+      map.on('click', 'buildings-clusters', (e) => {
+        const features = map.queryRenderedFeatures(e.point, {
+          layers: ['buildings-clusters'],
+        })
+        if (!features.length) return
+        const clusterId = features[0].properties.cluster_id
+        map.getSource('buildings').getClusterExpansionZoom(clusterId, (err, zoom) => {
+          if (err) return
+          map.easeTo({
+            center: features[0].geometry.coordinates,
+            zoom: zoom + 0.5,
+            duration: 400,
+          })
+        })
+      })
 
-      map.on('click', (event) => {
-        const hits = map.queryRenderedFeatures(event.point, { layers: [LAYER_IDS.clusters, LAYER_IDS.points, LAYER_IDS.nearby] });
-        if (hits.length > 0) return;
-        mapClickRef.current({
-          latitude: Number(event.lngLat.lat.toFixed(6)),
-          longitude: Number(event.lngLat.lng.toFixed(6)),
-          radiusInMeters: DEFAULT_RADIUS
-        });
-      });
+      map.on('mouseenter', 'buildings-clusters', () => {
+        map.getCanvas().style.cursor = 'pointer'
+      })
+      map.on('mouseleave', 'buildings-clusters', () => {
+        map.getCanvas().style.cursor = useMapStore.getState().nearbyActive ? 'crosshair' : ''
+      })
 
-      [LAYER_IDS.clusters, LAYER_IDS.points, LAYER_IDS.nearby].forEach((layerId) => {
-        map.on('mouseenter', layerId, () => {
-          map.getCanvas().style.cursor = 'pointer';
-        });
-        map.on('mouseleave', layerId, () => {
-          map.getCanvas().style.cursor = '';
-        });
-      });
-    });
+      map.on('click', 'buildings-point', (e) => {
+        const features = e.features ?? []
+        if (!features.length) return
+        if (features.length === 1) {
+          applyBuildingSelection(map, features[0], selectBuilding)
+          return
+        }
+        openBuildingChoicePopup(map, features, searchPopupRef, selectBuilding)
+      })
 
-    mapRef.current = map;
+      map.on('mouseenter', 'buildings-point', () => {
+        map.getCanvas().style.cursor = 'pointer'
+      })
+      map.on('mouseleave', 'buildings-point', () => {
+        map.getCanvas().style.cursor = useMapStore.getState().nearbyActive ? 'crosshair' : ''
+      })
+
+      map.on('click', 'nearby-results', (e) => {
+        const features = e.features ?? []
+        if (!features.length) return
+        if (features.length === 1) {
+          applyBuildingSelection(map, features[0], selectBuilding)
+          return
+        }
+        openBuildingChoicePopup(map, features, searchPopupRef, selectBuilding)
+      })
+
+      map.on('mouseenter', 'nearby-results', () => {
+        map.getCanvas().style.cursor = 'pointer'
+      })
+      map.on('mouseleave', 'nearby-results', () => {
+        map.getCanvas().style.cursor = useMapStore.getState().nearbyActive ? 'crosshair' : ''
+      })
+
+      map.on('click', 'search-result-point', (e) => {
+        const f = e.features?.[0]
+        if (!f) return
+        openSearchResultPopup(map, f, searchPopupRef, selectBuilding, clearSearchResult)
+      })
+
+      map.on('mouseenter', 'search-result-point', () => {
+        map.getCanvas().style.cursor = 'pointer'
+      })
+      map.on('mouseleave', 'search-result-point', () => {
+        map.getCanvas().style.cursor = useMapStore.getState().nearbyActive ? 'crosshair' : ''
+      })
+
+      map.on('click', async (e) => {
+        const layerFeatures = map.queryRenderedFeatures(e.point, {
+          layers: ['buildings-point', 'buildings-clusters', 'nearby-results', 'search-result-point'],
+        })
+        if (layerFeatures.length > 0) return
+
+        const storeState = useMapStore.getState()
+        if (!storeState.nearbyActive) return
+
+        const { lng, lat } = e.lngLat
+        const radius = storeState.nearbyRadius
+
+        const circle = makeCircleGeoJSON([lng, lat], radius)
+        map.getSource('nearby-circle').setData({
+          type: 'FeatureCollection',
+          features: [circle],
+        })
+        setNearbyCircle(circle)
+
+        try {
+          const result = await fetchNearby({
+            latitude: lat,
+            longitude: lng,
+            radiusInMeters: radius,
+          })
+
+          const raw = Array.isArray(result) ? result
+            : result?.features ? result.features
+            : []
+
+          const currentAllFeatures = useMapStore.getState().allFeatures
+          const enriched = enrichNearbyWithBuildings(raw, currentAllFeatures)
+
+          setNearbyResults(enriched)
+
+          map.easeTo({
+            center: [lng, lat],
+            zoom: Math.max(map.getZoom(), 13),
+            duration: 600,
+          })
+        } catch (err) {
+          console.error('Nearby fetch failed:', err)
+        }
+      })
+    })
+
     return () => {
-      popupRef.current?.remove();
-      map.remove();
-      mapRef.current = null;
-    };
-  }, [setSelectedFeature]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map?.isStyleLoaded()) return;
-    const source = map.getSource(SOURCE_IDS.buildings);
-    if (source) source.setData(featureCollection);
-    const markerVisibility = viewMode === 'markers' ? 'visible' : 'none';
-    const heatmapVisibility = viewMode === 'heatmap' ? 'visible' : 'none';
-    map.setLayoutProperty(LAYER_IDS.clusters, 'visibility', markerVisibility);
-    map.setLayoutProperty(LAYER_IDS.clusterCount, 'visibility', markerVisibility);
-    map.setLayoutProperty(LAYER_IDS.points, 'visibility', markerVisibility);
-    map.setLayoutProperty(LAYER_IDS.heatmap, 'visibility', heatmapVisibility);
-  }, [featureCollection, viewMode]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map?.isStyleLoaded()) return;
-    const source = map.getSource(SOURCE_IDS.selected);
-    if (!source) return;
-    if (!selectedFeature) {
-      source.setData(buildFeatureCollection([]));
-      popupRef.current?.remove();
-      return;
+      map.remove()
+      _mapRef.current = null
+      if (mapRef) mapRef.current = null
     }
-    source.setData(buildFeatureCollection([selectedFeature]));
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const map = _mapRef.current
+    if (!map || !map.isStyleLoaded()) return
+    const source = map.getSource('buildings')
+    const heatmapSource = map.getSource('heatmap-buildings')
+    if (!source || !heatmapSource) return
+
+    const data = {
+      type: 'FeatureCollection',
+      features: filteredFeatures,
+    }
+    const heatmapData = {
+      type: 'FeatureCollection',
+      features: buildAverageHeatmapFeatures(filteredFeatures),
+    }
+
+    source.setData(data)
+    heatmapSource.setData(heatmapData)
+  }, [filteredFeatures])
+
+  useEffect(() => {
+    const map = _mapRef.current
+    if (!map) return
+    map.getCanvas().style.cursor = nearbyActive ? 'crosshair' : ''
+  }, [nearbyActive])
+
+  useEffect(() => {
+    const map = _mapRef.current
+    if (!map || !map.isStyleLoaded()) return
+    if (!nearbyCircle) {
+      const src = map.getSource('nearby-circle')
+      if (src) src.setData({ type: 'FeatureCollection', features: [] })
+    }
+  }, [nearbyCircle])
+
+  useEffect(() => {
+    const map = _mapRef.current
+    if (!map || !map.isStyleLoaded()) return
+    const src = map.getSource('nearby-results')
+    if (!src) return
+    src.setData({
+      type: 'FeatureCollection',
+      features: nearbyResults,
+    })
+  }, [nearbyResults])
+
+  useEffect(() => {
+    const map = _mapRef.current
+    if (!map || !map.isStyleLoaded()) return
+
+    const src = map.getSource('search-result')
+    if (!src) return
+
+    if (searchPopupRef.current) {
+      searchPopupRef.current.remove()
+      searchPopupRef.current = null
+    }
+
+    const feature = normalizeToGeoJSONFeature(searchResult)
+
+    src.setData({
+      type: 'FeatureCollection',
+      features: feature ? [feature] : [],
+    })
+
+    if (!feature) return
+
+    const [lng, lat] = feature.geometry.coordinates
+
     map.flyTo({
-      center: selectedFeature.geometry.coordinates,
-      zoom: Math.max(map.getZoom(), 14),
-      duration: 1200,
-      essential: true
-    });
-  }, [selectedFeature]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map?.isStyleLoaded()) return;
-    const nearbySource = map.getSource(SOURCE_IDS.nearby);
-    const circleSource = map.getSource(SOURCE_IDS.nearbyCircle);
-    if (nearbySource) nearbySource.setData(nearbyCollection);
-    if (circleSource) circleSource.setData(nearbyCircleCollection);
-  }, [nearbyCollection, nearbyCircleCollection]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || hasFittedRef.current || allFeaturesCount === 0 || features.length === 0) return;
-    const coordinates = features.map((feature) => feature.geometry.coordinates);
-    const bounds = coordinates.reduce(
-      (accumulator, coordinate) => accumulator.extend(coordinate),
-      new maplibregl.LngLatBounds(coordinates[0], coordinates[0])
-    );
-    map.fitBounds(bounds, {
-      padding: { top: 140, right: 80, bottom: 80, left: 420 },
-      duration: 1400,
-      maxZoom: 12
-    });
-    hasFittedRef.current = true;
-  }, [allFeaturesCount, features]);
+      center: [lng, lat],
+      zoom: Math.max(map.getZoom(), 15),
+      duration: 700,
+      essential: true,
+    })
+  }, [searchResult])
 
   return (
-    <div className="map-shell">
-      <div ref={mapContainerRef} className="map-canvas" />
-      <div className="map-floating">
-        <MapLegend />
-        {isSearchingNearby && (
-          <motion.div className="map-pill" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}>
-            Finding nearby buildings within {DEFAULT_RADIUS.toLocaleString()} m...
-          </motion.div>
-        )}
-        {nearbyState.results.length > 0 && (
-          <div className="map-pill">
-            <strong>{nearbyState.results.length}</strong> nearby coordinates returned by the API
-          </div>
-        )}
-      </div>
-    </div>
-  );
+    <div
+      ref={containerRef}
+      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+    />
+  )
 }
-
-export default MapView;
