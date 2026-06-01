@@ -5,16 +5,10 @@ import '../styles/searchbar.css';
 function SearchBar({
   suggestions,
   hasData,
-  onSuggestionSelect,
-  onToggleTheme
+  onSuggestionSelect
 }) {
-  const theme = useStore((state) => state.theme);
-  const sidebarOpen = useStore((state) => state.sidebarOpen);
-  const nearbySearchEnabled = useStore((state) => state.nearbySearchEnabled);
   const searchQuery = useStore((state) => state.searchQuery);
   const setSearchQuery = useStore((state) => state.setSearchQuery);
-  const toggleSidebar = useStore((state) => state.toggleSidebar);
-  const toggleNearbySearch = useStore((state) => state.toggleNearbySearch);
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef(null);
 
@@ -82,29 +76,7 @@ function SearchBar({
             )}
         </div>
 
-        <div className="search-actions">
-          <button
-            type="button"
-            className={`chrome-button map-action-button ${sidebarOpen ? 'active' : ''}`}
-            onClick={toggleSidebar}
-            aria-pressed={sidebarOpen}
-          >
-            Filters
-          </button>
-          <button
-            type="button"
-            className={`chrome-button map-action-button ${nearbySearchEnabled ? 'active' : ''}`}
-            onClick={toggleNearbySearch}
-            aria-pressed={nearbySearchEnabled}
-          >
-            Radius
-          </button>
-        </div>
       </div>
-
-      <button type="button" className="chrome-button" onClick={onToggleTheme}>
-        {theme === 'dark' ? 'Light mode' : 'Dark mode'}
-      </button>
     </div>
   );
 }

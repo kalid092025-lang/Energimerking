@@ -53,7 +53,6 @@ function App() {
   const setAllFeatures = useStore((state) => state.setAllFeatures);
   const setSelectedFeature = useStore((state) => state.setSelectedFeature);
   const setNearby = useStore((state) => state.setNearby);
-  const toggleTheme = useStore((state) => state.toggleTheme);
   const setSearchQuery = useStore((state) => state.setSearchQuery);
   const [isSearchingNearby, setIsSearchingNearby] = useState(false);
   const [searchSelection, setSearchSelection] = useState(null);
@@ -173,7 +172,6 @@ function App() {
               suggestions={suggestions}
               hasData={allFeatures.length > 0}
               onSuggestionSelect={handleSuggestionSelect}
-              onToggleTheme={toggleTheme}
             />
           </div>
           <MapView

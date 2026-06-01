@@ -66,7 +66,6 @@ function Filters() {
         <div className="section-heading">
           <div>
             <div className="section-kicker">View mode</div>
-            <p>Switch between clustered markers and heatmap mode.</p>
           </div>
         </div>
         <div className="segment-control">
@@ -83,7 +82,6 @@ function Filters() {
         <div className="section-heading">
           <div>
             <div className="section-kicker">Filters</div>
-            <p>Client-side filters update the map in real time.</p>
           </div>
           <button type="button" className="reset-button" onClick={resetFilters}>
             Reset
@@ -130,15 +128,6 @@ function Filters() {
               ))}
             </select>
           </div>
-        </div>
-      </section>
-
-      <section className="filter-card">
-        <div className="section-kicker">How to use</div>
-        <div className="info-copy">
-          <p>Turn on Nearby radius, then click the map to draw a search radius.</p>
-          <p>Type in an address to zoom to a building and highlight it.</p>
-          <p>Switch to heatmap mode to compare energy-use intensity across the map.</p>
         </div>
       </section>
     </div>

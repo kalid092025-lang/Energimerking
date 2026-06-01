@@ -27,50 +27,74 @@ function energyClass(grade) {
   return /^[A-G]$/.test(normalized) ? `energy-${normalized.toLowerCase()}` : 'energy-unknown';
 }
 
+function hasValue(value) {
+  return value !== null && value !== undefined && value !== '';
+}
+
+function displayValue(value, fallback = 'Not registered') {
+  return hasValue(value) ? value : fallback;
+}
+
 function popupDetail(label, value) {
-  const displayValue = value !== null && value !== undefined && value !== '' ? value : 'N/A';
+  const valueClass = hasValue(value) ? 'popup-value' : 'popup-value popup-value-empty';
   return `
     <div class="popup-detail">
+      <span class="popup-label">${escapeHtml(label)}</span>
+      <strong class="${valueClass}">${escapeHtml(displayValue(value))}</strong>
+    </div>
+  `;
+}
+
+function popupMetric(label, value, modifier = '') {
+  const metricClass = ['popup-metric', modifier].filter(Boolean).join(' ');
+  const valueClass = hasValue(value) ? 'popup-metric-value' : 'popup-metric-value popup-value-empty';
+  return `
+    <div class="${metricClass}">
       <span>${escapeHtml(label)}</span>
-      <strong>${escapeHtml(displayValue)}</strong>
+      <strong class="${valueClass}">${escapeHtml(displayValue(value, 'N/A'))}</strong>
     </div>
   `;
 }
 
 function popupHtml(properties) {
-  const address = escapeHtml(properties.adresse || 'Unknown address');
-  const municipality = escapeHtml(properties.kommunenavn || 'Unknown municipality');
-  const energyGrade = properties.energikarakter || 'N/A';
+  const address = escapeHtml(displayValue(properties.adresse, 'Unknown address'));
+  const municipality = escapeHtml(displayValue(properties.kommunenavn, 'Unknown municipality'));
+  const energyGrade = displayValue(properties.energikarakter, 'N/A');
   const energyGradeDisplay = escapeHtml(energyGrade);
   const energyGradeClass = energyClass(energyGrade);
+  const energyUse = properties.beregnetLevertEnergiTotaltkWhm2 ?? properties.energibruk_kwh_m2;
 
   return `
     <div class="popup-card">
       <div class="popup-header">
-        <div>
-          <div class="popup-kicker">Building insight</div>
+        <div class="popup-heading">
+          <div class="popup-kicker">Energy certificate</div>
           <div class="popup-title">${address}</div>
           <div class="popup-subtitle">${municipality}</div>
         </div>
-        <div class="energy-badge ${energyGradeClass}" title="Energy grade">${energyGradeDisplay}</div>
+        <div class="energy-badge ${energyGradeClass}" title="Energy grade">
+          <span>Grade</span>
+          <strong>${energyGradeDisplay}</strong>
+        </div>
+      </div>
+      <div class="popup-metrics">
+        ${popupMetric('Unit', properties.bruksenhetsNr, 'popup-metric-compact')}
+        ${popupMetric('Energy use', energyUse, 'popup-metric-compact')}
+        ${popupMetric('Built', properties.byggeaar, 'popup-metric-compact')}
       </div>
       <div class="popup-details">
-        ${popupDetail('Adresse', properties.adresse)}
-        ${popupDetail('Kommune', properties.kommunenavn)}
+        ${popupDetail('Address', properties.adresse)}
+        ${popupDetail('Municipality', properties.kommunenavn)}
         ${popupDetail('Gård', properties.gard)}
         ${popupDetail('Bruk', properties.bruksnummer)}
         ${popupDetail('Feste', properties.feste)}
         ${popupDetail('Andel', properties.andel)}
         ${popupDetail('Seksjon', properties.seksjon)}
-        ${popupDetail('BruksenhetsNr', properties.bruksenhetsNr)}
-        ${popupDetail('OrganisasjonsNr', properties.organisasjonsNr)}
-        ${popupDetail('Attestnummer', properties.attestnummer)}
-        ${popupDetail('Utstedelsesdato', properties.utstedelsesdato)}
-        ${popupDetail('Energikarakter', properties.energikarakter)}
-        ${popupDetail('Oppvarmingskarakter', properties.oppvarmingskarakter)}
-        ${popupDetail('Beregnet levert energi kWh/m2', properties.beregnetLevertEnergiTotaltkWhm2 ?? properties.energibruk_kwh_m2)}
-        ${popupDetail('Materialvalg', properties.materialvalg)}
-        ${popupDetail('Byggeår', properties.byggeaar)}
+        ${popupDetail('Organisation no.', properties.organisasjonsNr)}
+        ${popupDetail('Certificate no.', properties.attestnummer)}
+        ${popupDetail('Issued', properties.utstedelsesdato)}
+        ${popupDetail('Heating grade', properties.oppvarmingskarakter)}
+        ${popupDetail('Material', properties.materialvalg)}
       </div>
     </div>
   `;
@@ -177,6 +201,47 @@ function nearbyUnitsListHtml(units, address = 'Unknown address', coordinates = [
       </div>
     </div>
   `;
+}
+
+function keepPopupInView(map, popup) {
+  requestAnimationFrame(() => {
+    const popupElement = popup.getElement();
+    const containerElement = map.getContainer();
+    if (!popupElement || !containerElement) return;
+
+    const popupRect = popupElement.getBoundingClientRect();
+    const containerRect = containerElement.getBoundingClientRect();
+    const popupCenterX = popupRect.left + popupRect.width / 2;
+    const popupCenterY = popupRect.top + popupRect.height / 2;
+    const containerCenterX = containerRect.left + containerRect.width / 2;
+    const containerCenterY = containerRect.top + containerRect.height / 2;
+
+    map.panBy(
+      [
+        popupCenterX - containerCenterX,
+        popupCenterY - containerCenterY
+      ],
+      {
+        duration: 360,
+        essential: true
+      }
+    );
+  });
+}
+
+function openPopup(map, coordinates, html) {
+  const popup = new maplibregl.Popup({
+    closeButton: true,
+    closeOnClick: false,
+    offset: 18,
+    maxWidth: 'none'
+  })
+    .setLngLat(coordinates)
+    .setHTML(html)
+    .addTo(map);
+
+  keepPopupInView(map, popup);
+  return popup;
 }
 
 function MapLegend() {
@@ -447,14 +512,13 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
         const address = selected?.properties?.adresse || feature.properties.adresse || 'Unknown address';
         setSelectedFeature(selected || null);
         popupRef.current?.remove();
-        popupRef.current = new maplibregl.Popup({ closeButton: true, closeOnClick: false, offset: 16 })
-          .setLngLat(coordinates)
-          .setHTML(
-            unitsAtLocation.length > 1
-              ? nearbyUnitsListHtml(unitsToListPayload(unitsAtLocation), address, coordinates)
-              : popupHtml(selected?.properties || feature.properties)
-          )
-          .addTo(map);
+        popupRef.current = openPopup(
+          map,
+          coordinates,
+          unitsAtLocation.length > 1
+            ? nearbyUnitsListHtml(unitsToListPayload(unitsAtLocation), address, coordinates)
+            : popupHtml(selected?.properties || feature.properties)
+        );
       });
 
       // Add delegated click handler for unit selection at the document level
@@ -482,10 +546,11 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
           
           // Use a small delay to ensure removal is complete
           setTimeout(() => {
-            popupRef.current = new maplibregl.Popup({ closeButton: true, closeOnClick: false, offset: 16 })
-              .setLngLat([parseFloat(lng) || 0, parseFloat(lat) || 0])
-              .setHTML(popupHtml(selected.properties))
-              .addTo(map);
+            popupRef.current = openPopup(
+              map,
+              [parseFloat(lng) || 0, parseFloat(lat) || 0],
+              popupHtml(selected.properties)
+            );
           }, 100);
         }
       };
@@ -520,20 +585,20 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
           // Store a reference to the current feature for the event handler
           const currentFeatureCoordinates = feature.geometry.coordinates.slice();
           
-          popupRef.current = new maplibregl.Popup({ closeButton: true, closeOnClick: false, offset: 16 })
-            .setLngLat(currentFeatureCoordinates)
-            .setHTML(nearbyUnitsListHtml(feature.properties.units, address, currentFeatureCoordinates))
-            .addTo(map);
+          popupRef.current = openPopup(
+            map,
+            currentFeatureCoordinates,
+            nearbyUnitsListHtml(feature.properties.units, address, currentFeatureCoordinates)
+          );
         } else {
           // Single unit - show full building info
           const selected = findFeatureById(allFeaturesRef.current, feature.properties.coordinateid);
           setSelectedFeature(selected || null);
-          popupRef.current = new maplibregl.Popup({ closeButton: true, closeOnClick: false, offset: 16 })
-            .setLngLat(feature.geometry.coordinates.slice())
-            .setHTML(
-              selected ? popupHtml(selected.properties) : nearbyPopupHtml(feature.properties)
-            )
-            .addTo(map);
+          popupRef.current = openPopup(
+            map,
+            feature.geometry.coordinates.slice(),
+            selected ? popupHtml(selected.properties) : nearbyPopupHtml(feature.properties)
+          );
         }
       });
 
@@ -613,14 +678,13 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
     const address = searchedFeature.properties?.adresse || 'Unknown address';
 
     popupRef.current?.remove();
-    popupRef.current = new maplibregl.Popup({ closeButton: true, closeOnClick: false, offset: 16 })
-      .setLngLat(coordinates)
-      .setHTML(
-        unitsAtLocation.length > 1
-          ? nearbyUnitsListHtml(unitsToListPayload(unitsAtLocation), address, coordinates)
-          : popupHtml(searchedFeature.properties)
-      )
-      .addTo(map);
+    popupRef.current = openPopup(
+      map,
+      coordinates,
+      unitsAtLocation.length > 1
+        ? nearbyUnitsListHtml(unitsToListPayload(unitsAtLocation), address, coordinates)
+        : popupHtml(searchedFeature.properties)
+    );
   }, [searchSelection]);
 
   useEffect(() => {

@@ -7,50 +7,154 @@ function toNumber(value, fallback = null) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function normalizeKey(key) {
+  return String(key)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
 function firstValue(source, keys, fallback = '') {
+  if (!source || typeof source !== 'object') {
+    return fallback;
+  }
+
   for (const key of keys) {
-    if (source?.[key] !== null && source?.[key] !== undefined && source?.[key] !== '') {
+    if (source[key] !== null && source[key] !== undefined && source[key] !== '') {
       return source[key];
+    }
+  }
+
+  const sourceKeys = new Map(
+    Object.keys(source).map((key) => [normalizeKey(key), key])
+  );
+
+  for (const key of keys) {
+    const sourceKey = sourceKeys.get(normalizeKey(key));
+    if (
+      sourceKey &&
+      source[sourceKey] !== null &&
+      source[sourceKey] !== undefined &&
+      source[sourceKey] !== ''
+    ) {
+      return source[sourceKey];
     }
   }
 
   return fallback;
 }
 
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function firstObject(value) {
+  return asArray(value).find((item) => item && typeof item === 'object') || {};
+}
+
+function firstNestedValue(sources, keys, fallback = '') {
+  for (const source of sources) {
+    const value = firstValue(source, keys, undefined);
+    if (value !== undefined) {
+      return value;
+    }
+  }
+
+  return fallback;
+}
+
+function normalizeAttest(normalized, attest) {
+  if (!attest) return;
+
+  if (typeof attest === 'object') {
+    normalized.attestnummer ||= firstValue(attest, ['attestnummer', 'Attestnummer', 'attestNr', 'AttestNr']);
+    normalized.utstedelsesdato ||= firstValue(attest, ['utstedelsesdato', 'Utstedelsesdato', 'utstedelsesDato', 'UtstedelsesDato']);
+    normalized.energikarakter ||= firstValue(attest, ['energikarakter', 'Energikarakter']);
+    normalized.oppvarmingskarakter ||= firstValue(attest, ['oppvarmingskarakter', 'Oppvarmingskarakter']);
+    normalized.materialvalg ||= firstValue(attest, ['materialvalg', 'Materialvalg', 'matierialvalg', 'Matierialvalg']);
+
+    if (!normalized.energibruk_kwh_m2 || normalized.energibruk_kwh_m2 === 0) {
+      normalized.energibruk_kwh_m2 = toNumber(
+        firstValue(attest, [
+          'energibruk_kwh_m2',
+          'EnergibrukKwhM2',
+          'beregnetLevertEnergiTotaltkWhm2',
+          'BeregnetLevertEnergiTotaltkWhm2'
+        ], null),
+        normalized.energibruk_kwh_m2
+      );
+      normalized.beregnetLevertEnergiTotaltkWhm2 = normalized.energibruk_kwh_m2;
+    }
+
+    if (!normalized.byggeaar) {
+      normalized.byggeaar = toNumber(
+        firstValue(attest, ['byggeaar', 'Byggeaar', 'byggeår', 'Byggeår'], null),
+        normalized.byggeaar
+      );
+    }
+
+    return;
+  }
+
+  if (typeof attest !== 'string') return;
+
+  const energyMatch = attest.match(/beregnetLevertEnergiTotaltkWhm2=([0-9]+(?:\.[0-9]+)?)/i);
+  if (energyMatch && (!normalized.energibruk_kwh_m2 || normalized.energibruk_kwh_m2 === 0)) {
+    normalized.energibruk_kwh_m2 = toNumber(energyMatch[1], normalized.energibruk_kwh_m2 || 0);
+    normalized.beregnetLevertEnergiTotaltkWhm2 = normalized.energibruk_kwh_m2;
+  }
+
+  const gradeMatch = attest.match(/energikarakter=([A-G])/i);
+  if (gradeMatch && !normalized.energikarakter) {
+    normalized.energikarakter = gradeMatch[1];
+  }
+
+  const yearMatch =
+    attest.match(/bygge\W*ar=?(\d{3,4})/i) ||
+    attest.match(/byggeaar=?(\d{3,4})/i) ||
+    attest.match(/byggeår=?(\d{3,4})/i);
+  if (yearMatch && !normalized.byggeaar) {
+    normalized.byggeaar = toNumber(yearMatch[1], normalized.byggeaar);
+  }
+}
+
 function normalizeProperties(rawProperties = {}, coordinates = []) {
+  const eiendommer = asArray(firstValue(rawProperties, ['eiendommer', 'eiendom'], []));
+  const firstEiendom = firstObject(eiendommer);
+  const firstAttest = firstObject(firstValue(firstEiendom, ['attestListe', 'attestliste', 'attestListeRaw'], []));
+  const propertySources = [rawProperties, firstEiendom, firstAttest];
   const id = firstValue(
     rawProperties,
     ['id', 'denormId', 'DenormId', 'coordinateid', 'Coordinateid', 'CoordinateId', 'Bygningsnummer', 'bygningsnummer'],
     `${coordinates[0] || 0}-${coordinates[1] || 0}`
   );
-
-  return {
+  const normalized = {
     id,
-    Bygningsnummer: firstValue(rawProperties, ['Bygningsnummer', 'bygningsnummer']),
-    gard: firstValue(rawProperties, ['gard', 'gaard', 'Gardsnummer', 'gardsnummer', 'Gårdsnummer', 'gårdsnummer']),
-    bruksnummer: firstValue(rawProperties, ['bruksnummer', 'Bruksnummer', 'Bruksnummmer', 'bruk', 'Bruk']),
-    feste: firstValue(rawProperties, ['feste', 'Feste', 'festenummer', 'Festenummer']),
-    andel: firstValue(rawProperties, ['andel', 'Andel', 'andelsnummer', 'Andelsnummer']),
-    seksjon: firstValue(rawProperties, ['seksjon', 'Seksjon', 'seksjonsnummer', 'Seksjonsnummer']),
-    adresse: firstValue(rawProperties, ['adresse', 'Adresse']),
-    attestnummer: firstValue(rawProperties, ['attestnummer', 'Attestnummer']),
-    organisasjonsNr: firstValue(rawProperties, ['organisasjonsNr', 'OrganisasjonsNr', 'organisasjonsnummer', 'Organisasjonsnummer']),
-    utstedelsesdato: firstValue(rawProperties, ['utstedelsesdato', 'Utstedelsesdato']),
-    materialvalg: firstValue(rawProperties, ['materialvalg', 'Materialvalg']),
-    poststed: firstValue(rawProperties, ['poststed', 'Poststed']),
-    postnummer: firstValue(rawProperties, ['postnummer', 'Postnummer']),
-    kommunenavn: firstValue(rawProperties, ['kommunenavn', 'Kommunenavn', 'kommune', 'Kommune']),
-    bruksenhetsNr: firstValue(rawProperties, [
+    Bygningsnummer: firstNestedValue(propertySources, ['Bygningsnummer', 'bygningsnummer']),
+    gard: firstNestedValue(propertySources, ['gard', 'gaard', 'gård', 'Gardsnummer', 'gardsnummer', 'Gårdsnummer', 'gårdsnummer']),
+    bruksnummer: firstNestedValue(propertySources, ['bruksnummer', 'Bruksnummer', 'Bruksnummmer', 'bruk', 'Bruk']),
+    feste: firstNestedValue(propertySources, ['feste', 'Feste', 'festeNr', 'FesteNr', 'festenummer', 'Festenummer']),
+    andel: firstNestedValue(propertySources, ['andel', 'Andel', 'andelsNr', 'AndelsNr', 'andelsnummer', 'Andelsnummer']),
+    seksjon: firstNestedValue(propertySources, ['seksjon', 'Seksjon', 'seksjonsNr', 'SeksjonsNr', 'seksjonsnummer', 'Seksjonsnummer']),
+    adresse: firstNestedValue(propertySources, ['adresse', 'Adresse']),
+    attestnummer: firstNestedValue(propertySources, ['attestnummer', 'Attestnummer', 'attestNr', 'AttestNr']),
+    organisasjonsNr: firstNestedValue(propertySources, ['organisasjonsNr', 'OrganisasjonsNr', 'organisasjonsnummer', 'Organisasjonsnummer']),
+    utstedelsesdato: firstNestedValue(propertySources, ['utstedelsesdato', 'Utstedelsesdato', 'utstedelsesDato', 'UtstedelsesDato']),
+    materialvalg: firstNestedValue(propertySources, ['materialvalg', 'Materialvalg', 'matierialvalg', 'Matierialvalg']),
+    poststed: firstNestedValue(propertySources, ['poststed', 'Poststed']),
+    postnummer: firstNestedValue(propertySources, ['postnummer', 'Postnummer']),
+    kommunenavn: firstNestedValue(propertySources, ['kommunenavn', 'Kommunenavn', 'kommune', 'Kommune', 'kommuneNr', 'KommuneNr']),
+    bruksenhetsNr: firstNestedValue(propertySources, [
       'bruksenhetsNr',
       'BruksenhetsNr',
       'brukenhetsnummer',
       'Brukenhetsnummer',
       'bruksenhetsnummer'
     ]),
-    energikarakter: firstValue(rawProperties, ['energikarakter', 'Energikarakter']),
-    oppvarmingskarakter: firstValue(rawProperties, ['oppvarmingskarakter', 'Oppvarmingskarakter']),
+    energikarakter: firstNestedValue(propertySources, ['energikarakter', 'Energikarakter']),
+    oppvarmingskarakter: firstNestedValue(propertySources, ['oppvarmingskarakter', 'Oppvarmingskarakter']),
     beregnetLevertEnergiTotaltkWhm2: toNumber(
-      firstValue(rawProperties, [
+      firstNestedValue(propertySources, [
         'energibruk_kwh_m2',
         'EnergibrukKwhM2',
         'beregnetLevertEnergiTotaltkWhm2',
@@ -59,7 +163,7 @@ function normalizeProperties(rawProperties = {}, coordinates = []) {
       0
     ),
     energibruk_kwh_m2: toNumber(
-      firstValue(rawProperties, [
+      firstNestedValue(propertySources, [
         'energibruk_kwh_m2',
         'EnergibrukKwhM2',
         'beregnetLevertEnergiTotaltkWhm2',
@@ -67,8 +171,24 @@ function normalizeProperties(rawProperties = {}, coordinates = []) {
       ], null),
       0
     ),
-    byggeaar: toNumber(firstValue(rawProperties, ['byggeaar', 'Byggeaar', 'byggeår', 'Byggeår'], null), null)
+    byggeaar: toNumber(firstNestedValue(propertySources, ['byggeaar', 'Byggeaar', 'byggeår', 'Byggeår'], null), null)
   };
+
+  try {
+    for (const eiendom of eiendommer) {
+      const attestListe = asArray(firstValue(eiendom, ['attestListe', 'attestliste', 'attestListeRaw'], []));
+      for (const attest of attestListe) {
+        normalizeAttest(normalized, attest);
+        if (normalized.energibruk_kwh_m2 > 0 && normalized.energikarakter) break;
+      }
+
+      if (normalized.energibruk_kwh_m2 > 0 && normalized.energikarakter) break;
+    }
+  } catch {
+    // Nested certificate data is best-effort.
+  }
+
+  return normalized;
 }
 
 export function normalizeGeoJson(payload) {

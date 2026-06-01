@@ -1,6 +1,6 @@
 .search-layout {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: flex-start;
   gap: 10px;
 }
@@ -14,8 +14,8 @@
 
 .search-wrapper {
   position: relative;
-  width: min(62vw, 44rem);
-  min-width: 18rem;
+  width: min(58vw, 42rem);
+  min-width: min(28rem, 58vw);
 }
 
 .chrome-button,
@@ -33,22 +33,6 @@
   height: 48px;
   border-radius: 8px;
   color: var(--text);
-}
-
-.search-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.map-action-button {
-  min-width: 86px;
-  font-weight: 600;
-}
-
-.map-action-button.active {
-  border-color: #1a73e8;
-  background: #e8f0fe;
-  color: #174ea6;
 }
 
 .search-shell {
@@ -157,7 +141,8 @@
   }
 
   .search-wrapper {
-    width: 100%;
+    width: min(100%, 36rem);
+    min-width: 0;
   }
 }
 
@@ -176,11 +161,4 @@
     min-width: 0;
   }
 
-  .search-actions {
-    width: 100%;
-  }
-
-  .map-action-button {
-    flex: 1;
-  }
 }
