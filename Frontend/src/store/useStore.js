@@ -12,6 +12,7 @@ export const useStore = create((set) => ({
   error: '',
   viewMode: 'markers',
   nearbySearchEnabled: false,
+  radiusInMeters: 5000,
   searchQuery: '',
   allFeatures: [],
   selectedFeature: null,
@@ -24,7 +25,7 @@ export const useStore = create((set) => ({
   filters: {
     byggeaar: defaultBounds.byggeaar,
     energibruk_kwh_m2: defaultBounds.energibruk_kwh_m2,
-    energikarakter: 'all',
+    energikarakter: [],
     oppvarmingskarakter: 'all'
   },
   toggleTheme: () =>
@@ -51,28 +52,37 @@ export const useStore = create((set) => ({
           ? state.nearby
           : {
               center: null,
-              radiusInMeters: 5000,
+              radiusInMeters: state.radiusInMeters,
               results: []
             }
       };
     }),
   setNearbySearchEnabled: (nearbySearchEnabled) => set({ nearbySearchEnabled }),
-  setNearby: (nearby) => set({ nearby }),
-  clearNearby: () =>
-    set({
+  setRadiusInMeters: (radiusInMeters) =>
+    set(() => ({
+      radiusInMeters,
       nearby: {
         center: null,
-        radiusInMeters: 5000,
+        radiusInMeters,
         results: []
       }
-    }),
+    })),
+  setNearby: (nearby) => set({ nearby }),
+  clearNearby: () =>
+    set((state) => ({
+      nearby: {
+        center: null,
+        radiusInMeters: state.radiusInMeters,
+        results: []
+      }
+    })),
   initializeFilters: (bounds) =>
     set({
       filterBounds: bounds,
       filters: {
         byggeaar: bounds.byggeaar,
         energibruk_kwh_m2: bounds.energibruk_kwh_m2,
-        energikarakter: 'all',
+        energikarakter: [],
         oppvarmingskarakter: 'all'
       }
     }),
@@ -95,7 +105,7 @@ export const useStore = create((set) => ({
       filters: {
         byggeaar: state.filterBounds.byggeaar,
         energibruk_kwh_m2: state.filterBounds.energibruk_kwh_m2,
-        energikarakter: 'all',
+        energikarakter: [],
         oppvarmingskarakter: 'all'
       }
     }))

@@ -32,8 +32,10 @@ function Sidebar({ featureCount, totalCount, isSearchingNearby }) {
               className={`tool-button ${nearbySearchEnabled ? 'active' : ''}`}
               onClick={toggleNearbySearch}
               aria-pressed={nearbySearchEnabled}
+              aria-label="Toggle radius search. When enabled, click the map to search for buildings inside the selected radius."
+              title="Toggle radius search. When enabled, click the map to search for buildings inside the selected radius."
             >
-              <span>Radius</span>
+              <span>Radius <span className="tool-help" aria-hidden="true">?</span></span>
               <strong>{nearbySearchEnabled ? 'On' : 'Off'}</strong>
             </button>
             <button type="button" className="tool-button icon-tool" onClick={toggleTheme}>

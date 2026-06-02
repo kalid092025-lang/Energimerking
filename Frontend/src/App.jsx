@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import MapView from './components/MapView.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import SearchBar from './components/SearchBar.jsx';
-import { fetchBuildingsGeoJson } from './services/api.js';
+import { fetchBuildingsGeoJson, fetchNearbyBuildingsGeoJson } from './services/api.js';
 import { useStore } from './store/useStore.js';
 import {
   buildInitialFilterBounds,
@@ -36,6 +36,20 @@ function extractErrorMessage(error, fallbackMessage) {
   }
 
   return fallbackMessage;
+}
+
+function mergeFeaturesById(existingFeatures, incomingFeatures) {
+  const merged = new Map();
+
+  existingFeatures.forEach((feature) => {
+    merged.set(String(feature.id || feature.properties?.id), feature);
+  });
+
+  incomingFeatures.forEach((feature) => {
+    merged.set(String(feature.id || feature.properties?.id), feature);
+  });
+
+  return Array.from(merged.values());
 }
 
 function App() {
@@ -115,38 +129,51 @@ function App() {
     });
   };
 
-  const handleMapClick = ({ latitude, longitude, radiusInMeters }) => {
+  const handleMapClick = async ({ latitude, longitude, radiusInMeters }) => {
     setIsSearchingNearby(true);
     setError('');
 
-    const center = { latitude, longitude };
-    const results = allFeatures
-      .map((feature) => {
-        const [featureLongitude, featureLatitude] = feature.geometry.coordinates;
-        const featurePoint = {
-          latitude: Number(featureLatitude),
-          longitude: Number(featureLongitude)
-        };
+    try {
+      const center = { latitude, longitude };
+      const payload = await fetchNearbyBuildingsGeoJson({
+        latitude,
+        longitude,
+        radiusInMeters,
+        amount: 2000
+      });
+      const normalized = normalizeGeoJson(payload);
+      const results = normalized.features
+        .map((feature) => {
+          const [featureLongitude, featureLatitude] = feature.geometry.coordinates;
+          const featurePoint = {
+            latitude: Number(featureLatitude),
+            longitude: Number(featureLongitude)
+          };
 
-        return {
-          coordinateid: feature.properties.id,
-          latitude: featurePoint.latitude,
-          longitude: featurePoint.longitude,
-          bruksenhetsNr: feature.properties.bruksenhetsNr || feature.properties.brukenhetsnummer || '',
-          energikarakter: feature.properties.energikarakter || '',
-          distanceInMeters: distanceInMeters(center, featurePoint)
-        };
-      })
-      .filter((item) => item.distanceInMeters <= radiusInMeters)
-      .sort((left, right) => left.distanceInMeters - right.distanceInMeters)
-      .slice(0, 200);
+          return {
+            coordinateid: feature.properties.id,
+            latitude: featurePoint.latitude,
+            longitude: featurePoint.longitude,
+            bruksenhetsNr: feature.properties.bruksenhetsNr || feature.properties.brukenhetsnummer || '',
+            energikarakter: feature.properties.energikarakter || '',
+            distanceInMeters: distanceInMeters(center, featurePoint)
+          };
+        })
+        .filter((item) => item.distanceInMeters <= radiusInMeters)
+        .sort((left, right) => left.distanceInMeters - right.distanceInMeters)
+        .slice(0, 200);
 
-    setNearby({
-      center,
-      radiusInMeters,
-      results
-    });
-    setIsSearchingNearby(false);
+      setAllFeatures(mergeFeaturesById(allFeatures, normalized.features));
+      setNearby({
+        center,
+        radiusInMeters,
+        results
+      });
+    } catch (nearbyError) {
+      setError(extractErrorMessage(nearbyError, 'Failed to search nearby buildings.'));
+    } finally {
+      setIsSearchingNearby(false);
+    }
   };
 
   const isEmpty = !isLoading && !error && filteredFeatures.length === 0;

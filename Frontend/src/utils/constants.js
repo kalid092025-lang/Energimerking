@@ -15,6 +15,7 @@ export const LAYER_IDS = {
   clusterCount: 'cluster-count',
   points: 'unclustered-points',
   heatmap: 'buildings-heatmap',
+  heatmapPoints: 'buildings-heatmap-points',
   selectedHalo: 'selected-building-halo',
   selectedPoint: 'selected-building-point',
   nearby: 'nearby-layer',

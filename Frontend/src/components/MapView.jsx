@@ -5,7 +5,6 @@ import { useStore } from '../store/useStore.js';
 import { buildFeatureCollection, buildNearbyCircleGeoJson, buildNearbyGeoJson } from '../utils/geo.js';
 import {
   DEFAULT_CENTER,
-  DEFAULT_RADIUS,
   DEFAULT_ZOOM,
   LAYER_IDS,
   MAP_STYLE_URL,
@@ -36,11 +35,13 @@ function displayValue(value, fallback = 'Not registered') {
 }
 
 function popupDetail(label, value) {
+  if (!hasValue(value)) return '';
+
   const valueClass = hasValue(value) ? 'popup-value' : 'popup-value popup-value-empty';
   return `
     <div class="popup-detail">
       <span class="popup-label">${escapeHtml(label)}</span>
-      <strong class="${valueClass}">${escapeHtml(displayValue(value))}</strong>
+      <strong class="${valueClass}">${escapeHtml(value)}</strong>
     </div>
   `;
 }
@@ -56,13 +57,27 @@ function popupMetric(label, value, modifier = '') {
   `;
 }
 
+function firstPopulated(...values) {
+  return values.find((value) => hasValue(value));
+}
+
 function popupHtml(properties) {
   const address = escapeHtml(displayValue(properties.adresse, 'Unknown address'));
-  const municipality = escapeHtml(displayValue(properties.kommunenavn, 'Unknown municipality'));
+  const municipality = hasValue(properties.kommunenavn) ? escapeHtml(properties.kommunenavn) : '';
   const energyGrade = displayValue(properties.energikarakter, 'N/A');
   const energyGradeDisplay = escapeHtml(energyGrade);
   const energyGradeClass = energyClass(energyGrade);
   const energyUse = properties.beregnetLevertEnergiTotaltkWhm2 ?? properties.energibruk_kwh_m2;
+  const unitNumber = firstPopulated(
+    properties.brukenhetsnummer,
+    properties.brukenhetsNR,
+    properties.bruksenhetsNr,
+    properties.bruksenhetsnummer,
+    properties.Brukenhetsnummer,
+    properties.BrukenhetsNR,
+    properties.BruksenhetsNr,
+    properties.Bruksenhetsnummer
+  );
 
   return `
     <div class="popup-card">
@@ -70,7 +85,7 @@ function popupHtml(properties) {
         <div class="popup-heading">
           <div class="popup-kicker">Energy certificate</div>
           <div class="popup-title">${address}</div>
-          <div class="popup-subtitle">${municipality}</div>
+          ${municipality ? `<div class="popup-subtitle">${municipality}</div>` : ''}
         </div>
         <div class="energy-badge ${energyGradeClass}" title="Energy grade">
           <span>Grade</span>
@@ -78,7 +93,7 @@ function popupHtml(properties) {
         </div>
       </div>
       <div class="popup-metrics">
-        ${popupMetric('Unit', properties.bruksenhetsNr, 'popup-metric-compact')}
+        ${popupMetric('Unit', unitNumber, 'popup-metric-compact')}
         ${popupMetric('Energy use', energyUse, 'popup-metric-compact')}
         ${popupMetric('Built', properties.byggeaar, 'popup-metric-compact')}
       </div>
@@ -223,6 +238,22 @@ function heatmapWeightExpression(stats) {
   ];
 }
 
+function heatmapPointColorExpression(stats) {
+  return [
+    'interpolate',
+    ['linear'],
+    ['coalesce', ['get', 'heatmapEnergy'], 0],
+    0,
+    '#7dd3fc',
+    stats.p50,
+    '#2dd4bf',
+    stats.p80,
+    '#fde047',
+    stats.p95,
+    '#ef4444'
+  ];
+}
+
 function unitsToListPayload(units) {
   return JSON.stringify(
     units.map((unit) => {
@@ -233,7 +264,16 @@ function unitsToListPayload(units) {
         adresse: props.adresse || props.Adresse || '',
         poststed: props.poststed || props.Poststed || '',
         kommunenavn: props.kommunenavn || props.Kommunenavn || '',
-        bruksenhetsNr: props.bruksenhetsNr || props.brukenhetsnummer || '',
+        bruksenhetsNr: firstPopulated(
+          props.brukenhetsnummer,
+          props.brukenhetsNR,
+          props.bruksenhetsNr,
+          props.bruksenhetsnummer,
+          props.Brukenhetsnummer,
+          props.BrukenhetsNR,
+          props.BruksenhetsNr,
+          props.Bruksenhetsnummer
+        ) || '',
         energikarakter: props.energikarakter || props.Energikarakter || '',
         distanceInMeters: props.distanceInMeters
       };
@@ -257,7 +297,16 @@ function nearbyPopupHtml(properties) {
   if (unitCount > 1) {
     html += `<div class="popup-grid"><div class="popup-metric"><span>Building units</span><strong>${unitCount}</strong></div></div>`;
   } else {
-    const unitNumber = escapeHtml(properties.bruksenhetsNr || properties.brukenhetsnummer || 'N/A');
+    const unitNumber = escapeHtml(firstPopulated(
+      properties.brukenhetsnummer,
+      properties.brukenhetsNR,
+      properties.bruksenhetsNr,
+      properties.bruksenhetsnummer,
+      properties.Brukenhetsnummer,
+      properties.BrukenhetsNR,
+      properties.BruksenhetsNr,
+      properties.Bruksenhetsnummer
+    ) || 'N/A');
     html += `
       <div class="popup-grid">
         <div class="popup-metric"><span>Unit number</span><strong>${unitNumber}</strong></div>
@@ -374,7 +423,7 @@ function MapLegend({ heatmapStats }) {
             <span>High {formatEnergy(heatmapStats.p80)}</span>
             <span>Extreme {formatEnergy(heatmapStats.p95)}+</span>
           </div>
-          <div className="legend-copy">Median energy use per building location.</div>
+          <div className="legend-copy">Each building location is colored by median energy use.</div>
         </>
       ) : (
         <div className="legend-list">
@@ -479,6 +528,20 @@ function addMapLayers(map) {
     }
   });
 
+  map.addLayer({
+    id: LAYER_IDS.heatmapPoints,
+    type: 'circle',
+    source: SOURCE_IDS.heatmapBuildings,
+    layout: { visibility: 'none' },
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 3.5, 10, 5.5, 14, 8],
+      'circle-color': '#2dd4bf',
+      'circle-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0.55, 10, 0.72, 14, 0.86],
+      'circle-stroke-color': 'rgba(255, 255, 255, 0.86)',
+      'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 5, 0.4, 12, 1.2]
+    }
+  });
+
   map.addSource(SOURCE_IDS.selected, { type: 'geojson', data: buildFeatureCollection([]) });
   map.addLayer({
     id: LAYER_IDS.selectedHalo,
@@ -540,6 +603,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
   const hasFittedRef = useRef(false);
   const viewMode = useStore((state) => state.viewMode);
   const nearbySearchEnabled = useStore((state) => state.nearbySearchEnabled);
+  const radiusInMeters = useStore((state) => state.radiusInMeters);
   const setSelectedFeature = useStore((state) => state.setSelectedFeature);
   const featureCollection = useMemo(() => buildFeatureCollection(features), [features]);
   const heatmapData = useMemo(() => buildHeatmapData(features), [features]);
@@ -560,6 +624,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
   const selectedFeatureRef = useRef(selectedFeature);
   const viewModeRef = useRef(viewMode);
   const nearbySearchEnabledRef = useRef(nearbySearchEnabled);
+  const radiusInMetersRef = useRef(radiusInMeters);
 
   useEffect(() => {
     featuresRef.current = features;
@@ -606,6 +671,10 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
   }, [nearbySearchEnabled]);
 
   useEffect(() => {
+    radiusInMetersRef.current = radiusInMeters;
+  }, [radiusInMeters]);
+
+  useEffect(() => {
     if (mapRef.current || !mapContainerRef.current) return undefined;
 
     const map = new maplibregl.Map({
@@ -629,6 +698,11 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
         'heatmap-weight',
         heatmapWeightExpression(heatmapStatsRef.current)
       );
+      map.setPaintProperty(
+        LAYER_IDS.heatmapPoints,
+        'circle-color',
+        heatmapPointColorExpression(heatmapStatsRef.current)
+      );
 
       const markerVisibility = viewModeRef.current === 'markers' ? 'visible' : 'none';
       const heatmapVisibility = viewModeRef.current === 'heatmap' ? 'visible' : 'none';
@@ -636,6 +710,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
       map.setLayoutProperty(LAYER_IDS.clusterCount, 'visibility', markerVisibility);
       map.setLayoutProperty(LAYER_IDS.points, 'visibility', markerVisibility);
       map.setLayoutProperty(LAYER_IDS.heatmap, 'visibility', heatmapVisibility);
+      map.setLayoutProperty(LAYER_IDS.heatmapPoints, 'visibility', heatmapVisibility);
 
       if (selectedFeatureRef.current) {
         map.getSource(SOURCE_IDS.selected).setData(
@@ -773,7 +848,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
         mapClickRef.current({
           latitude: Number(event.lngLat.lat.toFixed(6)),
           longitude: Number(event.lngLat.lng.toFixed(6)),
-          radiusInMeters: DEFAULT_RADIUS
+          radiusInMeters: radiusInMetersRef.current
         });
       });
 
@@ -804,12 +879,14 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
     if (source) source.setData(featureCollection);
     if (heatmapSource) heatmapSource.setData(heatmapData.collection);
     map.setPaintProperty(LAYER_IDS.heatmap, 'heatmap-weight', heatmapWeightExpression(heatmapData.stats));
+    map.setPaintProperty(LAYER_IDS.heatmapPoints, 'circle-color', heatmapPointColorExpression(heatmapData.stats));
     const markerVisibility = viewMode === 'markers' ? 'visible' : 'none';
     const heatmapVisibility = viewMode === 'heatmap' ? 'visible' : 'none';
     map.setLayoutProperty(LAYER_IDS.clusters, 'visibility', markerVisibility);
     map.setLayoutProperty(LAYER_IDS.clusterCount, 'visibility', markerVisibility);
     map.setLayoutProperty(LAYER_IDS.points, 'visibility', markerVisibility);
     map.setLayoutProperty(LAYER_IDS.heatmap, 'visibility', heatmapVisibility);
+    map.setLayoutProperty(LAYER_IDS.heatmapPoints, 'visibility', heatmapVisibility);
   }, [featureCollection, heatmapData, viewMode]);
 
   useEffect(() => {
@@ -884,12 +961,12 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
         <MapLegend heatmapStats={heatmapData.stats} />
         {nearbySearchEnabled && (
           <div className="map-pill">
-            Click the map to search within {DEFAULT_RADIUS.toLocaleString()} m
+            Click the map to search within {radiusInMeters.toLocaleString()} m
           </div>
         )}
         {isSearchingNearby && (
           <div className="map-pill">
-            Finding nearby buildings within {DEFAULT_RADIUS.toLocaleString()} m...
+            Finding nearby buildings within {radiusInMeters.toLocaleString()} m...
           </div>
         )}
         {nearbyState.results.length > 0 && (

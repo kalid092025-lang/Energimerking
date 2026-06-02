@@ -38,11 +38,33 @@ async function getJson(path, params) {
   return payload;
 }
 
-export async function fetchBuildingsGeoJson() {
+const DEFAULT_BUILDING_QUERY = {
+  latitude: 59.917330,
+  longitude: 10.844128,
+  radiusInMeters: 3000,
+  amount: 20000,
+  onlyNew: false
+};
+
+export async function fetchBuildingsGeoJson(params = {}) {
   return getJson('/bygg/GetNearbyDeNormGeoJson', {
-    latitude: 59.917330,
-    longitude:  10.844128,
-    radiusInMeters: 3000,
-    amount: 20000
+    ...DEFAULT_BUILDING_QUERY,
+    ...params
+  });
+}
+
+export async function fetchNearbyBuildingsGeoJson({
+  latitude,
+  longitude,
+  radiusInMeters = 5000,
+  amount = 2000,
+  onlyNew = false
+}) {
+  return getJson('/bygg/GetNearbyDeNormGeoJson', {
+    latitude,
+    longitude,
+    radiusInMeters,
+    amount,
+    onlyNew
   });
 }

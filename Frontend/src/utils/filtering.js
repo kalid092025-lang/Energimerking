@@ -44,8 +44,45 @@ function firstValue(source, keys, fallback = '') {
   return fallback;
 }
 
+function hasAnyKey(source, keys) {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) {
+    return false;
+  }
+
+  return keys.some((key) => firstValue(source, [key], undefined) !== undefined);
+}
+
 function asArray(value) {
-  return Array.isArray(value) ? value : [];
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    try {
+      return asArray(JSON.parse(value));
+    } catch {
+      return [];
+    }
+  }
+
+  if (value && typeof value === 'object') {
+    const objectLooksLikeUnit = hasAnyKey(value, [
+      'bruksenhetsNr',
+      'brukenhetsnummer',
+      'adresse',
+      'attestListe',
+      'attestliste',
+      'attestListeRaw'
+    ]);
+
+    if (objectLooksLikeUnit) {
+      return [value];
+    }
+
+    return Object.values(value).filter((item) => item && typeof item === 'object');
+  }
+
+  return [];
 }
 
 function firstObject(value) {
@@ -61,6 +98,33 @@ function firstNestedValue(sources, keys, fallback = '') {
   }
 
   return fallback;
+}
+
+const UNIT_NUMBER_KEYS = [
+  'bruksenhetsNr',
+  'BruksenhetsNr',
+  'brukenhetsnummer',
+  'Brukenhetsnummer',
+  'brukenhetsNR',
+  'BrukenhetsNR',
+  'bruksenhetsnummer',
+  'Bruksenhetsnummer'
+];
+
+function firstUnitNumber(sources, eiendommer) {
+  const directValue = firstNestedValue(sources, UNIT_NUMBER_KEYS);
+  if (directValue) {
+    return directValue;
+  }
+
+  for (const eiendom of eiendommer) {
+    const value = firstValue(eiendom, UNIT_NUMBER_KEYS);
+    if (value) {
+      return value;
+    }
+  }
+
+  return '';
 }
 
 function normalizeAttest(normalized, attest) {
@@ -123,6 +187,7 @@ function normalizeProperties(rawProperties = {}, coordinates = []) {
   const firstEiendom = firstObject(eiendommer);
   const firstAttest = firstObject(firstValue(firstEiendom, ['attestListe', 'attestliste', 'attestListeRaw'], []));
   const propertySources = [rawProperties, firstEiendom, firstAttest];
+  const unitNumber = firstUnitNumber(propertySources, eiendommer);
   const id = firstValue(
     rawProperties,
     ['id', 'denormId', 'DenormId', 'coordinateid', 'Coordinateid', 'CoordinateId', 'Bygningsnummer', 'bygningsnummer'],
@@ -143,14 +208,10 @@ function normalizeProperties(rawProperties = {}, coordinates = []) {
     materialvalg: firstNestedValue(propertySources, ['materialvalg', 'Materialvalg', 'matierialvalg', 'Matierialvalg']),
     poststed: firstNestedValue(propertySources, ['poststed', 'Poststed']),
     postnummer: firstNestedValue(propertySources, ['postnummer', 'Postnummer']),
-    kommunenavn: firstNestedValue(propertySources, ['kommunenavn', 'Kommunenavn', 'kommune', 'Kommune', 'kommuneNr', 'KommuneNr']),
-    bruksenhetsNr: firstNestedValue(propertySources, [
-      'bruksenhetsNr',
-      'BruksenhetsNr',
-      'brukenhetsnummer',
-      'Brukenhetsnummer',
-      'bruksenhetsnummer'
-    ]),
+    kommunenavn: firstNestedValue(propertySources, ['kommunenavn', 'Kommunenavn']),
+    kommunenummer: firstNestedValue(propertySources, ['kommunenummer', 'Kommunenummer', 'kommune', 'Kommune', 'kommuneNr', 'KommuneNr']),
+    bruksenhetsNr: unitNumber,
+    brukenhetsnummer: unitNumber,
     energikarakter: firstNestedValue(propertySources, ['energikarakter', 'Energikarakter']),
     oppvarmingskarakter: firstNestedValue(propertySources, ['oppvarmingskarakter', 'Oppvarmingskarakter']),
     beregnetLevertEnergiTotaltkWhm2: toNumber(
@@ -191,6 +252,62 @@ function normalizeProperties(rawProperties = {}, coordinates = []) {
   return normalized;
 }
 
+function normalizeUnitFeature(feature, unitProperties, parentId, unitIndex) {
+  const coordinates = feature.geometry.coordinates;
+  const unitId = firstValue(
+    unitProperties,
+    ['denormId', 'DenormId', 'id', 'coordinateid', 'Coordinateid', 'CoordinateId'],
+    `${parentId}-unit-${unitIndex}`
+  );
+  const properties = normalizeProperties(
+    {
+      ...feature.properties,
+      ...unitProperties,
+      eiendommer: [unitProperties]
+    },
+    coordinates
+  );
+
+  return {
+    ...feature,
+    id: unitId,
+    properties: {
+      ...properties,
+      id: unitId,
+      parentId
+    }
+  };
+}
+
+function normalizeFeature(feature, index) {
+  const coordinates = feature.geometry.coordinates;
+  const baseProperties = normalizeProperties(feature.properties, coordinates);
+  const parentId = baseProperties.id || `feature-${index}`;
+  const eiendommer = asArray(firstValue(feature.properties, ['eiendommer', 'eiendom'], []));
+  const unitFeatures = eiendommer
+    .map((eiendom, unitIndex) => normalizeUnitFeature(feature, eiendom, parentId, unitIndex))
+    .filter((unitFeature) => (
+      unitFeature.properties.bruksenhetsNr ||
+      unitFeature.properties.brukenhetsnummer ||
+      unitFeature.properties.attestnummer ||
+      unitFeature.properties.energikarakter ||
+      unitFeature.properties.energibruk_kwh_m2 > 0
+    ));
+
+  if (unitFeatures.length > 1) {
+    return unitFeatures;
+  }
+
+  return [{
+    ...feature,
+    id: parentId,
+    properties: {
+      ...baseProperties,
+      id: parentId
+    }
+  }];
+}
+
 export function normalizeGeoJson(payload) {
   const sourceFeatures = Array.isArray(payload?.features)
     ? payload.features
@@ -223,9 +340,9 @@ export function normalizeGeoJson(payload) {
           coordinates[1] !== null
         );
       })
+      .flatMap((feature, index) => normalizeFeature(feature, index))
       .map((feature, index) => {
-        const coordinates = feature.geometry.coordinates;
-        const properties = normalizeProperties(feature.properties, coordinates);
+        const properties = feature.properties;
         const searchText = [
           properties.adresse,
           properties.poststed,
@@ -282,8 +399,13 @@ export function filterFeatures(features, filters) {
 
     const matchesYear = year === null || (year >= yearMin && year <= yearMax);
     const matchesEnergy = energy >= energyMin && energy <= energyMax;
+    const selectedEnergyGrades = Array.isArray(filters.energikarakter)
+      ? filters.energikarakter
+      : filters.energikarakter === 'all'
+        ? []
+        : [filters.energikarakter];
     const matchesEnergyGrade =
-      filters.energikarakter === 'all' || props.energikarakter === filters.energikarakter;
+      selectedEnergyGrades.length === 0 || selectedEnergyGrades.includes(props.energikarakter);
     const matchesHeatingGrade =
       filters.oppvarmingskarakter === 'all' ||
       props.oppvarmingskarakter === filters.oppvarmingskarakter;
