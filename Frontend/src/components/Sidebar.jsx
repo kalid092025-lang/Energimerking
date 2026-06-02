@@ -11,6 +11,7 @@ function Sidebar({ featureCount, totalCount, isSearchingNearby }) {
   const toggleTheme = useStore((state) => state.toggleTheme);
   const toggleNearbySearch = useStore((state) => state.toggleNearbySearch);
   const clearNearby = useStore((state) => state.clearNearby);
+  const themeIcon = theme === 'dark' ? '/icons/moon.png' : '/icons/sun.png';
 
   return (
     <aside className={`sidebar-shell ${sidebarOpen ? 'is-open' : 'is-closed'}`}>
@@ -19,12 +20,12 @@ function Sidebar({ featureCount, totalCount, isSearchingNearby }) {
           <div className="sidebar-controls" aria-label="Map tools">
             <button
               type="button"
-              className={`tool-button ${sidebarOpen ? 'active' : ''}`}
+              className={`tool-button icon-tool ${sidebarOpen ? 'active' : ''}`}
               onClick={toggleSidebar}
               aria-pressed={sidebarOpen}
             >
-              <span>Filters</span>
-              <strong>{sidebarOpen ? 'Open' : 'Closed'}</strong>
+              <img src="/icons/filter.png" alt="" aria-hidden="true" />
+              <span className="sr-only">Filters</span>
             </button>
             <button
               type="button"
@@ -35,9 +36,9 @@ function Sidebar({ featureCount, totalCount, isSearchingNearby }) {
               <span>Radius</span>
               <strong>{nearbySearchEnabled ? 'On' : 'Off'}</strong>
             </button>
-            <button type="button" className="tool-button" onClick={toggleTheme}>
-              <span>Theme</span>
-              <strong>{theme === 'dark' ? 'Light' : 'Dark'}</strong>
+            <button type="button" className="tool-button icon-tool" onClick={toggleTheme}>
+              <img src={themeIcon} alt="" aria-hidden="true" />
+              <span className="sr-only">{theme === 'dark' ? 'Dark mode' : 'Light mode'}</span>
             </button>
           </div>
 

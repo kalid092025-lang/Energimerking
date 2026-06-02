@@ -12,7 +12,7 @@
 .map-floating {
   position: absolute;
   right: 20px;
-  bottom: 20px;
+  bottom: 108px;
   z-index: 20;
   display: flex;
   flex-direction: column;
@@ -32,13 +32,14 @@
 }
 
 .map-legend {
-  width: min(92vw, 260px);
-  padding: 12px;
+  width: max-content;
+  max-width: min(92vw, 230px);
+  padding: 9px 10px;
   border-radius: 8px;
 }
 
 .legend-kicker {
-  margin-bottom: 10px;
+  margin-bottom: 7px;
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -47,9 +48,11 @@
 }
 
 .legend-gradient {
+  width: 180px;
+  max-width: 100%;
   height: 12px;
   border-radius: 999px;
-  background: linear-gradient(90deg, #0f172a 0%, #1d4ed8 24%, #14b8a6 46%, #fde047 70%, #fb923c 84%, #dc2626 100%);
+  background: linear-gradient(90deg, rgba(125, 211, 252, 0.34) 0%, rgba(45, 212, 191, 0.44) 32%, rgba(163, 230, 53, 0.5) 58%, rgba(253, 224, 71, 0.56) 76%, rgba(253, 186, 116, 0.6) 92%, rgba(239, 68, 68, 0.72) 100%);
 }
 
 .legend-scale {
@@ -61,21 +64,30 @@
 }
 
 .legend-copy {
-  margin-top: 10px;
+  margin-top: 8px;
   font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.legend-breaks {
+  display: grid;
+  gap: 3px;
+  margin-top: 8px;
+  font-size: 0.72rem;
   color: var(--muted);
 }
 
 .legend-list {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   font-size: 0.82rem;
 }
 
 .legend-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  white-space: nowrap;
 }
 
 .legend-dot {
@@ -261,6 +273,11 @@
   margin-bottom: 3px;
 }
 
+.nearby-unit-location {
+  font-size: 0.75rem;
+  color: #5f6368;
+}
+
 .nearby-unit-distance {
   font-size: 0.75rem;
   color: #5f6368;
@@ -381,7 +398,7 @@
 @media (max-width: 900px) {
   .map-floating {
     right: 12px;
-    bottom: 12px;
+    bottom: 96px;
   }
 }
 

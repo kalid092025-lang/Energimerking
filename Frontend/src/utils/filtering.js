@@ -251,7 +251,7 @@ export function buildInitialFilterBounds(features) {
   if (features.length === 0) {
     return {
       byggeaar: [1900, 2026],
-      energibruk_kwh_m2: [0, 500]
+      energibruk_kwh_m2: [0, 2000]
     };
   }
 
@@ -267,10 +267,7 @@ export function buildInitialFilterBounds(features) {
       years.length ? Math.min(...years) : 1900,
       years.length ? Math.max(...years) : 2026
     ],
-    energibruk_kwh_m2: [
-      energyValues.length ? Math.floor(Math.min(...energyValues)) : 0,
-      energyValues.length ? Math.ceil(Math.max(...energyValues)) : 500
-    ]
+    energibruk_kwh_m2: [0, 2000]
   };
 }
 

@@ -28,7 +28,6 @@ function SearchBar({
       <div className="search-left">
         <div className="search-wrapper" ref={wrapperRef}>
           <div className="search-shell">
-            <span className="search-icon">S</span>
             <input
               type="text"
               value={searchQuery}

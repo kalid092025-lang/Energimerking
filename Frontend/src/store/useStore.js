@@ -2,7 +2,7 @@ import { create } from 'zustand';
 
 const defaultBounds = {
   byggeaar: [1900, 2026],
-  energibruk_kwh_m2: [0, 500]
+  energibruk_kwh_m2: [0, 2000]
 };
 
 export const useStore = create((set) => ({
@@ -42,9 +42,20 @@ export const useStore = create((set) => ({
   setSelectedFeature: (selectedFeature) => set({ selectedFeature }),
   setViewMode: (viewMode) => set({ viewMode }),
   toggleNearbySearch: () =>
-    set((state) => ({
-      nearbySearchEnabled: !state.nearbySearchEnabled
-    })),
+    set((state) => {
+      const nearbySearchEnabled = !state.nearbySearchEnabled;
+
+      return {
+        nearbySearchEnabled,
+        nearby: nearbySearchEnabled
+          ? state.nearby
+          : {
+              center: null,
+              radiusInMeters: 5000,
+              results: []
+            }
+      };
+    }),
   setNearbySearchEnabled: (nearbySearchEnabled) => set({ nearbySearchEnabled }),
   setNearby: (nearby) => set({ nearby }),
   clearNearby: () =>

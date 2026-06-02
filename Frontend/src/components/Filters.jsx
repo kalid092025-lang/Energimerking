@@ -3,6 +3,15 @@ import { useStore } from '../store/useStore.js';
 
 function RangeField({ label, min, max, value, onChange, suffix = '', step = 1 }) {
   const [currentMin, currentMax] = value;
+  const span = max - min || 1;
+  const minPercent = ((currentMin - min) / span) * 100;
+  const maxPercent = ((currentMax - min) / span) * 100;
+  const updateMin = (nextValue) => {
+    onChange([Math.min(Number(nextValue), currentMax), currentMax]);
+  };
+  const updateMax = (nextValue) => {
+    onChange([currentMin, Math.max(Number(nextValue), currentMin)]);
+  };
 
   return (
     <div className="filter-group">
@@ -14,22 +23,37 @@ function RangeField({ label, min, max, value, onChange, suffix = '', step = 1 })
           {suffix}
         </div>
       </div>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={currentMin}
-        onChange={(event) => onChange([Math.min(Number(event.target.value), currentMax), currentMax])}
-      />
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={currentMax}
-        onChange={(event) => onChange([currentMin, Math.max(Number(event.target.value), currentMin)])}
-      />
+      <div
+        className="range-slider"
+        style={{
+          '--range-start': `${minPercent}%`,
+          '--range-end': `${maxPercent}%`
+        }}
+      >
+        <div className="range-track">
+          <div className="range-track-fill" />
+        </div>
+        <input
+          className="range-input range-input-min"
+          type="range"
+          aria-label={`${label} minimum`}
+          min={min}
+          max={max}
+          step={step}
+          value={currentMin}
+          onChange={(event) => updateMin(event.target.value)}
+        />
+        <input
+          className="range-input range-input-max"
+          type="range"
+          aria-label={`${label} maximum`}
+          min={min}
+          max={max}
+          step={step}
+          value={currentMax}
+          onChange={(event) => updateMax(event.target.value)}
+        />
+      </div>
     </div>
   );
 }

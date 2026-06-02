@@ -127,14 +127,117 @@ function findUnitsAtFeatureLocation(features, selectedFeature) {
     });
 }
 
+function median(values) {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
+}
+
+function percentile(values, targetPercentile) {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((left, right) => left - right);
+  const index = (sorted.length - 1) * targetPercentile;
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  if (lower === upper) return sorted[lower];
+  return sorted[lower] + (sorted[upper] - sorted[lower]) * (index - lower);
+}
+
+function ascendingStops(values) {
+  let previous = 0;
+  return values.map((value) => {
+    const nextValue = Math.max(1, Math.round(Number(value) || 0));
+    previous = Math.max(previous + 1, nextValue);
+    return previous;
+  });
+}
+
+function buildHeatmapData(features) {
+  const grouped = new Map();
+
+  features.forEach((feature) => {
+    const key = coordinateKey(feature);
+    const energyUse = Number(feature.properties?.energibruk_kwh_m2);
+    if (!key || !Number.isFinite(energyUse) || energyUse <= 0) return;
+
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        coordinates: feature.geometry.coordinates,
+        values: []
+      });
+    }
+
+    grouped.get(key).values.push(energyUse);
+  });
+
+  const aggregatedFeatures = Array.from(grouped.entries()).map(([key, group]) => {
+    const heatmapEnergy = median(group.values);
+
+    return {
+      type: 'Feature',
+      id: `heatmap-${key}`,
+      geometry: {
+        type: 'Point',
+        coordinates: group.coordinates
+      },
+      properties: {
+        id: `heatmap-${key}`,
+        heatmapEnergy,
+        unitCount: group.values.length
+      }
+    };
+  });
+
+  const values = aggregatedFeatures.map((feature) => feature.properties.heatmapEnergy);
+  const [p50, p80, p95] = ascendingStops([
+    percentile(values, 0.5),
+    percentile(values, 0.8),
+    percentile(values, 0.95)
+  ]);
+
+  return {
+    collection: buildFeatureCollection(aggregatedFeatures),
+    stats: {
+      p50,
+      p80,
+      p95,
+      count: aggregatedFeatures.length
+    }
+  };
+}
+
+function heatmapWeightExpression(stats) {
+  return [
+    'interpolate',
+    ['linear'],
+    ['coalesce', ['get', 'heatmapEnergy'], 0],
+    0,
+    0,
+    stats.p50,
+    0.22,
+    stats.p80,
+    0.52,
+    stats.p95,
+    0.9
+  ];
+}
+
 function unitsToListPayload(units) {
   return JSON.stringify(
-    units.map((unit) => ({
-      id: unit.id || unit.properties?.id,
-      bruksenhetsNr: unit.properties?.bruksenhetsNr || unit.properties?.brukenhetsnummer || '',
-      energikarakter: unit.properties?.energikarakter || '',
-      distanceInMeters: unit.distanceInMeters
-    }))
+    units.map((unit) => {
+      const props = unit.properties || unit;
+
+      return {
+        id: unit.id || props.id || props.coordinateid || props.Coordinateid || props.CoordinateId,
+        adresse: props.adresse || props.Adresse || '',
+        poststed: props.poststed || props.Poststed || '',
+        kommunenavn: props.kommunenavn || props.Kommunenavn || '',
+        bruksenhetsNr: props.bruksenhetsNr || props.brukenhetsnummer || '',
+        energikarakter: props.energikarakter || props.Energikarakter || '',
+        distanceInMeters: props.distanceInMeters
+      };
+    })
   );
 }
 
@@ -174,13 +277,18 @@ function nearbyUnitsListHtml(units, address = 'Unknown address', coordinates = [
       (u) => `
       <div class="nearby-unit-item" data-coordinateid="${u.id}">
         <div class="nearby-unit-row">
-          <div class="nearby-unit-title">Unit: ${escapeHtml(u.bruksenhetsNr || 'N/A')}</div>
+          <div class="nearby-unit-title">${escapeHtml(u.adresse || 'Unknown address')}</div>
           ${
             u.energikarakter
               ? `<div class="energy-badge energy-badge-small ${energyClass(u.energikarakter)}">${escapeHtml(u.energikarakter)}</div>`
               : ''
           }
         </div>
+        ${
+          u.bruksenhetsNr || u.poststed || u.kommunenavn
+            ? `<div class="nearby-unit-location">${escapeHtml([u.bruksenhetsNr ? `Unit ${u.bruksenhetsNr}` : '', u.poststed, u.kommunenavn].filter(Boolean).join(' | '))}</div>`
+            : ''
+        }
         ${
           Number.isFinite(Number(u.distanceInMeters))
             ? `<div class="nearby-unit-distance">${Number(u.distanceInMeters).toFixed(0)} m</div>`
@@ -244,7 +352,11 @@ function openPopup(map, coordinates, html) {
   return popup;
 }
 
-function MapLegend() {
+function formatEnergy(value) {
+  return Number.isFinite(value) && value > 0 ? `${Math.round(value)} kWh/m2` : 'N/A';
+}
+
+function MapLegend({ heatmapStats }) {
   const viewMode = useStore((state) => state.viewMode);
 
   return (
@@ -254,10 +366,15 @@ function MapLegend() {
         <>
           <div className="legend-gradient" />
           <div className="legend-scale">
-            <span>Low usage</span>
-            <span>High usage</span>
+            <span>Low</span>
+            <span>Extreme</span>
           </div>
-          <div className="legend-copy">Heatmap intensity is based on energibruk_kwh_m2.</div>
+          <div className="legend-breaks">
+            <span>Typical {formatEnergy(heatmapStats.p50)}</span>
+            <span>High {formatEnergy(heatmapStats.p80)}</span>
+            <span>Extreme {formatEnergy(heatmapStats.p95)}+</span>
+          </div>
+          <div className="legend-copy">Median energy use per building location.</div>
         </>
       ) : (
         <div className="legend-list">
@@ -336,11 +453,29 @@ function addMapLayers(map) {
     maxzoom: 15,
     layout: { visibility: 'none' },
     paint: {
-      'heatmap-weight': ['interpolate', ['linear'], ['coalesce', ['get', 'energibruk_kwh_m2'], 0], 0, 0, 50, 0.25, 150, 0.65, 400, 1],
-      'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 5, 0.45, 9, 1.15, 13, 1.8],
-      'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'], 0, 'rgba(15,23,42,0)', 0.15, '#1d4ed8', 0.35, '#14b8a6', 0.55, '#fde047', 0.75, '#fb923c', 1, '#dc2626'],
-      'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 4, 16, 8, 28, 13, 44],
-      'heatmap-opacity': 0.82
+      'heatmap-weight': ['interpolate', ['linear'], ['coalesce', ['get', 'energibruk_kwh_m2'], 0], 0, 0, 60, 0.18, 180, 0.5, 420, 0.82],
+      'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 5, 0.2, 9, 0.55, 13, 0.85],
+      'heatmap-color': [
+        'interpolate',
+        ['linear'],
+        ['heatmap-density'],
+        0,
+        'rgba(56, 189, 248, 0)',
+        0.18,
+        'rgba(125, 211, 252, 0.34)',
+        0.38,
+        'rgba(45, 212, 191, 0.44)',
+        0.58,
+        'rgba(163, 230, 53, 0.5)',
+        0.76,
+        'rgba(253, 224, 71, 0.56)',
+        0.92,
+        'rgba(253, 186, 116, 0.6)',
+        1,
+        'rgba(239, 68, 68, 0.72)'
+      ],
+      'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 4, 26, 8, 44, 13, 72],
+      'heatmap-opacity': 0.58
     }
   });
 
@@ -407,6 +542,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
   const nearbySearchEnabled = useStore((state) => state.nearbySearchEnabled);
   const setSelectedFeature = useStore((state) => state.setSelectedFeature);
   const featureCollection = useMemo(() => buildFeatureCollection(features), [features]);
+  const heatmapData = useMemo(() => buildHeatmapData(features), [features]);
   const nearbyCollection = useMemo(() => buildNearbyGeoJson(nearbyState.results), [nearbyState.results]);
   const nearbyCircleCollection = useMemo(() => {
     if (!nearbyState.center) return buildFeatureCollection([]);
@@ -417,6 +553,8 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
     );
   }, [nearbyState.center, nearbyState.radiusInMeters]);
   const featureCollectionRef = useRef(featureCollection);
+  const heatmapCollectionRef = useRef(heatmapData.collection);
+  const heatmapStatsRef = useRef(heatmapData.stats);
   const nearbyCollectionRef = useRef(nearbyCollection);
   const nearbyCircleCollectionRef = useRef(nearbyCircleCollection);
   const selectedFeatureRef = useRef(selectedFeature);
@@ -434,6 +572,11 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
   useEffect(() => {
     featureCollectionRef.current = featureCollection;
   }, [featureCollection]);
+
+  useEffect(() => {
+    heatmapCollectionRef.current = heatmapData.collection;
+    heatmapStatsRef.current = heatmapData.stats;
+  }, [heatmapData]);
 
   useEffect(() => {
     nearbyCollectionRef.current = nearbyCollection;
@@ -478,9 +621,14 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
     map.on('load', () => {
       addMapLayers(map);
       map.getSource(SOURCE_IDS.buildings).setData(featureCollectionRef.current);
-      map.getSource(SOURCE_IDS.heatmapBuildings).setData(featureCollectionRef.current);
+      map.getSource(SOURCE_IDS.heatmapBuildings).setData(heatmapCollectionRef.current);
       map.getSource(SOURCE_IDS.nearby).setData(nearbyCollectionRef.current);
       map.getSource(SOURCE_IDS.nearbyCircle).setData(nearbyCircleCollectionRef.current);
+      map.setPaintProperty(
+        LAYER_IDS.heatmap,
+        'heatmap-weight',
+        heatmapWeightExpression(heatmapStatsRef.current)
+      );
 
       const markerVisibility = viewModeRef.current === 'markers' ? 'visible' : 'none';
       const heatmapVisibility = viewModeRef.current === 'heatmap' ? 'visible' : 'none';
@@ -554,13 +702,25 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
           }, 100);
         }
       };
+
+      const handlePopupOutsideClick = (event) => {
+        if (!popupRef.current) return;
+        const popupElement = popupRef.current.getElement();
+        if (popupElement?.contains(event.target)) return;
+
+        popupRef.current.remove();
+        popupRef.current = null;
+        setSelectedFeature(null);
+      };
       
       // Use capture because MapLibre popups can stop bubbling before document sees the click.
       document.addEventListener('click', handleUnitSelection, true);
+      document.addEventListener('mousedown', handlePopupOutsideClick, true);
       
       // Store cleanup function
       const cleanup = () => {
         document.removeEventListener('click', handleUnitSelection, true);
+        document.removeEventListener('mousedown', handlePopupOutsideClick, true);
       };
       
       mapRef.current._cleanup = cleanup;
@@ -581,6 +741,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
             ? findFeatureById(allFeaturesRef.current, firstBuildingId)
             : null;
           const address = firstBuilding?.properties?.adresse || 'Unknown address';
+          const enrichedUnits = parsedUnits.map((unit) => findFeatureById(allFeaturesRef.current, unit.id) || unit);
           
           // Store a reference to the current feature for the event handler
           const currentFeatureCoordinates = feature.geometry.coordinates.slice();
@@ -588,7 +749,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
           popupRef.current = openPopup(
             map,
             currentFeatureCoordinates,
-            nearbyUnitsListHtml(feature.properties.units, address, currentFeatureCoordinates)
+            nearbyUnitsListHtml(unitsToListPayload(enrichedUnits), address, currentFeatureCoordinates)
           );
         } else {
           // Single unit - show full building info
@@ -605,6 +766,9 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
       map.on('click', (event) => {
         const hits = map.queryRenderedFeatures(event.point, { layers: [LAYER_IDS.clusters, LAYER_IDS.points, LAYER_IDS.nearby] });
         if (hits.length > 0) return;
+        popupRef.current?.remove();
+        popupRef.current = null;
+        setSelectedFeature(null);
         if (!nearbySearchEnabledRef.current) return;
         mapClickRef.current({
           latitude: Number(event.lngLat.lat.toFixed(6)),
@@ -638,14 +802,15 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
     const source = map.getSource(SOURCE_IDS.buildings);
     const heatmapSource = map.getSource(SOURCE_IDS.heatmapBuildings);
     if (source) source.setData(featureCollection);
-    if (heatmapSource) heatmapSource.setData(featureCollection);
+    if (heatmapSource) heatmapSource.setData(heatmapData.collection);
+    map.setPaintProperty(LAYER_IDS.heatmap, 'heatmap-weight', heatmapWeightExpression(heatmapData.stats));
     const markerVisibility = viewMode === 'markers' ? 'visible' : 'none';
     const heatmapVisibility = viewMode === 'heatmap' ? 'visible' : 'none';
     map.setLayoutProperty(LAYER_IDS.clusters, 'visibility', markerVisibility);
     map.setLayoutProperty(LAYER_IDS.clusterCount, 'visibility', markerVisibility);
     map.setLayoutProperty(LAYER_IDS.points, 'visibility', markerVisibility);
     map.setLayoutProperty(LAYER_IDS.heatmap, 'visibility', heatmapVisibility);
-  }, [featureCollection, viewMode]);
+  }, [featureCollection, heatmapData, viewMode]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -716,7 +881,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
     <div className="map-shell">
       <div ref={mapContainerRef} className="map-canvas" />
       <div className="map-floating">
-        <MapLegend />
+        <MapLegend heatmapStats={heatmapData.stats} />
         {nearbySearchEnabled && (
           <div className="map-pill">
             Click the map to search within {DEFAULT_RADIUS.toLocaleString()} m
