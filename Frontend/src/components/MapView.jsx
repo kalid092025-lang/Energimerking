@@ -194,11 +194,11 @@ function upgradeRecommendations(properties) {
   } else if (heatingGrade === 'YELLOW') {
     recommendations.push('Heating is partly renewable; compare whether a larger renewable share would improve the certificate.');
   } else {
-    recommendations.push('Heating grade is already strong; energy envelope upgrades may matter more.');
+    recommendations.push('Heating grade is already strong; focus more on reducing heat loss through insulation, windows, roof, and walls.');
   }
 
   if (Number(properties.byggeaar) && Number(properties.byggeaar) < 1987) {
-    recommendations.push('Older building year suggests checking envelope upgrades before expensive system changes.');
+    recommendations.push('Older building year suggests checking insulation, windows, roof, and wall heat loss before expensive system changes.');
   }
 
   return recommendations;
