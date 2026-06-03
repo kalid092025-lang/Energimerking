@@ -5,6 +5,7 @@ export const DEFAULT_ZOOM = 5.2;
 export const SOURCE_IDS = {
   buildings: 'buildings',
   heatmapBuildings: 'heatmap-buildings',
+  energyTiles: 'energy-tiles',
   selected: 'selected-building',
   nearby: 'nearby-buildings',
   nearbyCircle: 'nearby-circle'
@@ -16,6 +17,7 @@ export const LAYER_IDS = {
   points: 'unclustered-points',
   heatmap: 'buildings-heatmap',
   heatmapPoints: 'buildings-heatmap-points',
+  energyTilePoints: 'energy-tile-points',
   selectedHalo: 'selected-building-halo',
   selectedPoint: 'selected-building-point',
   nearby: 'nearby-layer',
@@ -23,3 +25,5 @@ export const LAYER_IDS = {
 };
 
 export const MAP_STYLE_URL = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json';
+export const ENERGY_TILE_URL = 'http://localhost:5277/tiles/{z}/{x}/{y}.pbf';
+export const ENERGY_TILE_SOURCE_LAYER = 'points';

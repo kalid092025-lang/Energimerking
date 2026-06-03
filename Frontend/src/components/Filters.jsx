@@ -191,6 +191,9 @@ function Filters() {
           <button type="button" className={viewMode === 'heatmap' ? 'active' : ''} onClick={() => setViewMode('heatmap')}>
             Heatmap
           </button>
+          <button type="button" className={viewMode === 'tiles' ? 'active' : ''} onClick={() => setViewMode('tiles')}>
+            Tiles
+          </button>
         </div>
       </section>
 
