@@ -31,6 +31,17 @@
   font-size: 0.86rem;
 }
 
+.zoom-pill {
+  display: grid;
+  gap: 2px;
+  text-align: right;
+}
+
+.zoom-pill span {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
 .map-legend {
   width: max-content;
   max-width: min(92vw, 230px);

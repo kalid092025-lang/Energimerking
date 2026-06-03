@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useStore } from '../store/useStore.js';
@@ -709,6 +709,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
   const nearbySearchEnabled = useStore((state) => state.nearbySearchEnabled);
   const radiusInMeters = useStore((state) => state.radiusInMeters);
   const setSelectedFeature = useStore((state) => state.setSelectedFeature);
+  const [zoomLevel, setZoomLevel] = useState(DEFAULT_ZOOM);
   const featureCollection = useMemo(() => buildFeatureCollection(features), [features]);
   const heatmapData = useMemo(() => buildHeatmapData(features), [features]);
   const nearbyCollection = useMemo(() => buildNearbyGeoJson(nearbyState.results), [nearbyState.results]);
@@ -790,6 +791,13 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
     });
 
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
+    setZoomLevel(map.getZoom());
+
+    const updateZoomLevel = () => {
+      setZoomLevel(Number(map.getZoom().toFixed(1)));
+    };
+
+    map.on('zoom', updateZoomLevel);
 
     map.on('load', () => {
       addMapLayers(map);
@@ -1005,6 +1013,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
     return () => {
       popupRef.current?.remove();
       mapRef.current?._cleanup?.();
+      map.off('zoom', updateZoomLevel);
       map.remove();
       mapRef.current = null;
     };
@@ -1115,6 +1124,12 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
             <strong>{nearbyState.results.length}</strong> nearby loaded coordinates
           </div>
         )}
+        <div className="map-pill zoom-pill">
+          Zoom <strong>{zoomLevel.toFixed(1)}</strong>
+          {viewMode === 'tiles' && zoomLevel < 10 && (
+            <span>Tiles appear at 10+</span>
+          )}
+        </div>
       </div>
     </div>
   );
