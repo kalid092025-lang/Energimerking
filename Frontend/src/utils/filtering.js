@@ -254,6 +254,7 @@ function normalizeProperties(rawProperties = {}, coordinates = []) {
 
 function normalizeUnitFeature(feature, unitProperties, parentId, unitIndex) {
   const coordinates = feature.geometry.coordinates;
+  const unitNumber = firstValue(unitProperties, UNIT_NUMBER_KEYS);
   const unitId = firstValue(
     unitProperties,
     ['denormId', 'DenormId', 'id', 'coordinateid', 'Coordinateid', 'CoordinateId'],
@@ -274,7 +275,9 @@ function normalizeUnitFeature(feature, unitProperties, parentId, unitIndex) {
     properties: {
       ...properties,
       id: unitId,
-      parentId
+      parentId,
+      bruksenhetsNr: properties.bruksenhetsNr || unitNumber,
+      brukenhetsnummer: properties.brukenhetsnummer || unitNumber
     }
   };
 }

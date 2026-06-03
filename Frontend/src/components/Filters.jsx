@@ -76,20 +76,52 @@ function HelpLabel({ children, tooltip }) {
       >
         ?
       </button>
+      <span className="help-tooltip-panel" role="tooltip">{tooltip}</span>
     </span>
   );
 }
 
-function formatEnergyRange(min, max) {
-  if (!Number.isFinite(min) || !Number.isFinite(max)) {
-    return 'no energy use';
-  }
+const ENERGY_GRADE_MEANINGS = {
+  A: 'best',
+  B: 'very good',
+  C: 'good',
+  D: 'average',
+  E: 'weak',
+  F: 'poor',
+  G: 'weakest'
+};
 
-  const roundedMin = Math.round(min);
-  const roundedMax = Math.round(max);
-  return roundedMin === roundedMax
-    ? `${roundedMin} kWh/m2`
-    : `${roundedMin}-${roundedMax} kWh/m2`;
+const HEATING_GRADE_MEANINGS = {
+  GREEN: 'very high renewable/non-electric share',
+  YELLOW: 'moderate renewable share',
+  ORANGE: 'mostly electric heating',
+  RED: 'direct electric or fossil heating'
+};
+
+const HEATING_GRADE_ORDER = {
+  GREEN: 0,
+  YELLOW: 1,
+  ORANGE: 2,
+  RED: 3
+};
+
+function normalizeHeatingGrade(grade) {
+  return String(grade || '').trim().toUpperCase();
+}
+
+function heatingGradeMeaning(grade) {
+  return HEATING_GRADE_MEANINGS[normalizeHeatingGrade(grade)] || 'heating score';
+}
+
+function compareHeatingGrades(left, right) {
+  const leftGrade = normalizeHeatingGrade(left);
+  const rightGrade = normalizeHeatingGrade(right);
+  const leftOrder = HEATING_GRADE_ORDER[leftGrade] ?? 99;
+  const rightOrder = HEATING_GRADE_ORDER[rightGrade] ?? 99;
+
+  return leftOrder === rightOrder
+    ? leftGrade.localeCompare(rightGrade)
+    : leftOrder - rightOrder;
 }
 
 function Filters() {
@@ -108,35 +140,26 @@ function Filters() {
     : `${radiusInMeters} m`;
 
   const energyGrades = useMemo(() => {
-    const ranges = new Map();
+    const values = new Set();
     allFeatures.forEach((feature) => {
       const grade = feature.properties.energikarakter;
-      const energyUse = Number(feature.properties.energibruk_kwh_m2);
-      if (!grade || !Number.isFinite(energyUse) || energyUse <= 0) return;
-
-      const currentRange = ranges.get(grade) || {
-        min: energyUse,
-        max: energyUse
-      };
-      ranges.set(grade, {
-        min: Math.min(currentRange.min, energyUse),
-        max: Math.max(currentRange.max, energyUse)
-      });
+      if (grade) values.add(String(grade).trim().toUpperCase());
     });
-    return Array.from(ranges.entries())
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([grade, range]) => ({
+    return Array.from(values)
+      .sort((left, right) => left.localeCompare(right))
+      .map((grade) => ({
         grade,
-        rangeLabel: formatEnergyRange(range.min, range.max)
+        meaning: ENERGY_GRADE_MEANINGS[grade] || 'registered grade'
       }));
   }, [allFeatures]);
 
   const heatingGrades = useMemo(() => {
     const values = new Set();
     allFeatures.forEach((feature) => {
-      if (feature.properties.oppvarmingskarakter) values.add(feature.properties.oppvarmingskarakter);
+      const grade = feature.properties.oppvarmingskarakter;
+      if (grade && normalizeHeatingGrade(grade) !== 'LIGHT GREEN') values.add(grade);
     });
-    return ['all', ...Array.from(values).sort()];
+    return Array.from(values).sort(compareHeatingGrades);
   }, [allFeatures]);
 
   const selectedEnergyGrades = Array.isArray(filters.energikarakter)
@@ -220,7 +243,7 @@ function Filters() {
           <div className="filter-group">
             <div className="filter-label-row">
               <label>
-                <HelpLabel tooltip="Energy grade runs from A to G. A is best and G is weakest. Enova bases it on calculated delivered energy per square meter for normal use, not measured consumption.">
+                <HelpLabel tooltip="Energy grade runs from A to G. A is best and G is weakest. The exact kWh/m2 thresholds vary by building type/category, so loaded data ranges can overlap.">
                   Energy grade
                 </HelpLabel>
               </label>
@@ -229,14 +252,17 @@ function Filters() {
               </div>
             </div>
             <div className="checkbox-filter-list">
-              {energyGrades.map(({ grade, rangeLabel }) => (
+              {energyGrades.map(({ grade, meaning }) => (
                 <label key={grade} className="checkbox-filter-option">
                   <input
                     type="checkbox"
                     checked={selectedEnergyGrades.includes(grade)}
                     onChange={() => toggleEnergyGrade(grade)}
                   />
-                  <span>{grade} ({rangeLabel})</span>
+                  <span className="filter-option-copy">
+                    <strong>{grade}</strong>
+                    <span>{meaning}</span>
+                  </span>
                 </label>
               ))}
             </div>
@@ -244,18 +270,39 @@ function Filters() {
           <div className="filter-group">
             <div className="filter-label-row">
               <label>
-                <HelpLabel tooltip="Heating grade is the red-to-green score for the installed heating system. Green is best and means a high share of heating can use other energy carriers than direct electricity, oil, or gas. It is independent of the energy grade.">
+                <HelpLabel tooltip="Heating grade describes the heating energy source. Green means a very high share of renewable/non-electric heating. Yellow means moderate renewable heating. Orange is mostly electric heating. Red is predominantly direct electric or fossil-fuel heating.">
                   Heating grade
                 </HelpLabel>
               </label>
             </div>
-            <select value={filters.oppvarmingskarakter} onChange={(event) => updateSelect('oppvarmingskarakter', event.target.value)}>
+            <div className="checkbox-filter-list">
+              <label className="checkbox-filter-option">
+                <input
+                  type="radio"
+                  name="heating-grade"
+                  checked={filters.oppvarmingskarakter === 'all'}
+                  onChange={() => updateSelect('oppvarmingskarakter', 'all')}
+                />
+                <span className="filter-option-copy">
+                  <strong>All</strong>
+                  <span>all heating scores</span>
+                </span>
+              </label>
               {heatingGrades.map((grade) => (
-                <option key={grade} value={grade}>
-                  {grade === 'all' ? 'All types' : grade}
-                </option>
+                <label key={grade} className="checkbox-filter-option">
+                  <input
+                    type="radio"
+                    name="heating-grade"
+                    checked={filters.oppvarmingskarakter === grade}
+                    onChange={() => updateSelect('oppvarmingskarakter', grade)}
+                  />
+                  <span className="filter-option-copy">
+                    <strong>{grade}</strong>
+                    <span>{heatingGradeMeaning(grade)}</span>
+                  </span>
+                </label>
               ))}
-            </select>
+            </div>
           </div>
         </div>
       </section>

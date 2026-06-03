@@ -248,6 +248,7 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
+  position: relative;
 }
 
 .help-tooltip {
@@ -256,18 +257,26 @@
   place-items: center;
   width: 18px;
   height: 18px;
+  padding: 0;
   flex: 0 0 auto;
   border: 1px solid rgba(148, 163, 184, 0.5);
   border-radius: 50%;
   background: #ffffff;
   color: #1a73e8;
+  appearance: none;
+  font-family: Arial, sans-serif;
   font-size: 0.68rem;
   font-weight: 850;
-  line-height: 1;
+  line-height: 18px;
+  text-align: center;
   cursor: help;
 }
 
 .help-tooltip::after {
+  display: none;
+}
+
+.help-tooltip-panel {
   position: absolute;
   left: 0;
   top: calc(100% + 8px);
@@ -278,7 +287,6 @@
   background: #111827;
   color: #ffffff;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.2);
-  content: attr(data-tooltip);
   font-size: 0.72rem;
   font-weight: 650;
   line-height: 1.35;
@@ -288,10 +296,13 @@
   transform: translateY(-4px);
   transition: opacity 150ms ease, transform 150ms ease;
   white-space: normal;
+  overflow-wrap: anywhere;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
-.help-tooltip:hover::after,
-.help-tooltip:focus-visible::after {
+.help-tooltip:hover + .help-tooltip-panel,
+.help-tooltip:focus-visible + .help-tooltip-panel {
   opacity: 1;
   transform: translateY(0);
 }
@@ -451,6 +462,27 @@
   overflow-wrap: anywhere;
 }
 
+.filter-option-copy {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.filter-option-copy strong {
+  flex: 0 0 auto;
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.filter-option-copy span {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 550;
+  opacity: 0.76;
+}
+
 .theme-dark .checkbox-filter-option {
   background: rgba(255, 255, 255, 0.04);
   border-color: rgba(255, 255, 255, 0.08);
@@ -523,6 +555,12 @@
   text-transform: uppercase;
 }
 
+.tool-button:not(.icon-tool) > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
 .tool-button strong {
   display: block;
   margin-top: 3px;
@@ -539,8 +577,10 @@
   margin-left: 3px;
   border: 1px solid currentColor;
   border-radius: 50%;
+  font-family: Arial, sans-serif;
   font-size: 0.58rem;
-  line-height: 1;
+  line-height: 14px;
+  text-align: center;
 }
 
 .tool-button.active {
@@ -708,7 +748,7 @@
   color: #8ab4f8;
 }
 
-.theme-dark .help-tooltip::after {
+.theme-dark .help-tooltip-panel {
   background: #e2e8f0;
   color: #0f172a;
 }

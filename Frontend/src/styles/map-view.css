@@ -58,13 +58,35 @@
 .legend-scale {
   display: flex;
   justify-content: space-between;
-  margin-top: 8px;
+  gap: 12px;
+  margin-top: 7px;
   font-size: 0.72rem;
   color: var(--muted);
 }
 
+.legend-scale span {
+  display: grid;
+  gap: 2px;
+}
+
+.legend-scale span:last-child {
+  text-align: right;
+}
+
+.legend-scale strong {
+  color: var(--text);
+  font-size: 0.74rem;
+  line-height: 1.1;
+}
+
+.legend-scale small {
+  color: var(--muted);
+  font-size: 0.66rem;
+  line-height: 1;
+}
+
 .legend-copy {
-  margin-top: 8px;
+  margin-bottom: 8px;
   font-size: 0.78rem;
   color: var(--muted);
 }
@@ -168,12 +190,51 @@
 }
 
 .energy-badge span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   font-size: 0.56rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   line-height: 1;
   text-transform: uppercase;
   opacity: 0.82;
+}
+
+.popup-label-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.popup-help {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  flex: 0 0 auto;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  appearance: none;
+  font-family: Arial, sans-serif;
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 16px;
+  text-align: center;
+  opacity: 0.8;
+  cursor: help;
+}
+
+.popup-help:hover,
+.popup-help:focus-visible {
+  opacity: 1;
+  outline: 2px solid rgba(26, 115, 232, 0.35);
+  outline-offset: 2px;
 }
 
 .energy-badge strong {

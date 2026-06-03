@@ -34,24 +34,53 @@ function displayValue(value, fallback = 'Not registered') {
   return hasValue(value) ? value : fallback;
 }
 
-function popupDetail(label, value) {
+const POPUP_HELP = {
+  grade: 'Energy grade runs from A to G. A is best and G is weakest. It is based on calculated delivered energy per square meter for normal use.',
+  unit: 'The building unit number, called bruksenhetsnummer/bruksenhetsNr in the source data.',
+  energyUse: 'Calculated delivered energy per square meter for normal use, shown as kWh/m2.',
+  built: 'The construction year registered for the building or unit.',
+  address: 'The registered street address for this building or unit.',
+  municipality: 'The municipality name when available.',
+  gard: 'Norwegian property register farm number.',
+  bruk: 'Norwegian property register usage number.',
+  feste: 'Leasehold number from the property register, when registered.',
+  andel: 'Share number from the property register, when registered.',
+  seksjon: 'Section number from the property register, often used for condominiums/sections.',
+  organisation: 'Organisation number connected to the registered certificate, when available.',
+  certificate: 'Energy certificate identifier from Enova/energy marking data.',
+  issued: 'Date when the energy certificate was issued.',
+  heatingGrade: 'Heating grade is the red-to-green score for the installed heating system. Green is best and it is independent of the energy grade.',
+  material: 'Registered material or construction information, when present.'
+};
+
+function popupHelp(text) {
+  if (!text) return '';
+
+  return `<button type="button" class="popup-help" title="${escapeHtml(text)}" aria-label="${escapeHtml(text)}">?</button>`;
+}
+
+function popupLabel(label, tooltip = '') {
+  return `<span class="popup-label-text">${escapeHtml(label)}${popupHelp(tooltip)}</span>`;
+}
+
+function popupDetail(label, value, tooltip = '') {
   if (!hasValue(value)) return '';
 
   const valueClass = hasValue(value) ? 'popup-value' : 'popup-value popup-value-empty';
   return `
     <div class="popup-detail">
-      <span class="popup-label">${escapeHtml(label)}</span>
+      <span class="popup-label">${popupLabel(label, tooltip)}</span>
       <strong class="${valueClass}">${escapeHtml(value)}</strong>
     </div>
   `;
 }
 
-function popupMetric(label, value, modifier = '') {
+function popupMetric(label, value, modifier = '', tooltip = '') {
   const metricClass = ['popup-metric', modifier].filter(Boolean).join(' ');
   const valueClass = hasValue(value) ? 'popup-metric-value' : 'popup-metric-value popup-value-empty';
   return `
     <div class="${metricClass}">
-      <span>${escapeHtml(label)}</span>
+      <span>${popupLabel(label, tooltip)}</span>
       <strong class="${valueClass}">${escapeHtml(displayValue(value, 'N/A'))}</strong>
     </div>
   `;
@@ -69,14 +98,14 @@ function popupHtml(properties) {
   const energyGradeClass = energyClass(energyGrade);
   const energyUse = properties.beregnetLevertEnergiTotaltkWhm2 ?? properties.energibruk_kwh_m2;
   const unitNumber = firstPopulated(
-    properties.brukenhetsnummer,
-    properties.brukenhetsNR,
     properties.bruksenhetsNr,
     properties.bruksenhetsnummer,
-    properties.Brukenhetsnummer,
-    properties.BrukenhetsNR,
     properties.BruksenhetsNr,
-    properties.Bruksenhetsnummer
+    properties.Bruksenhetsnummer,
+    properties.brukenhetsnummer,
+    properties.brukenhetsNR,
+    properties.Brukenhetsnummer,
+    properties.BrukenhetsNR
   );
 
   return `
@@ -87,29 +116,29 @@ function popupHtml(properties) {
           <div class="popup-title">${address}</div>
           ${municipality ? `<div class="popup-subtitle">${municipality}</div>` : ''}
         </div>
-        <div class="energy-badge ${energyGradeClass}" title="Energy grade">
-          <span>Grade</span>
+        <div class="energy-badge ${energyGradeClass}">
+          <span>${popupHelp(POPUP_HELP.grade)}</span>
           <strong>${energyGradeDisplay}</strong>
         </div>
       </div>
       <div class="popup-metrics">
-        ${popupMetric('Unit', unitNumber, 'popup-metric-compact')}
-        ${popupMetric('Energy use', energyUse, 'popup-metric-compact')}
-        ${popupMetric('Built', properties.byggeaar, 'popup-metric-compact')}
+        ${popupMetric('Unit', unitNumber, 'popup-metric-compact', POPUP_HELP.unit)}
+        ${popupMetric('Energy use', energyUse, 'popup-metric-compact', POPUP_HELP.energyUse)}
+        ${popupMetric('Built', properties.byggeaar, 'popup-metric-compact', POPUP_HELP.built)}
       </div>
       <div class="popup-details">
-        ${popupDetail('Address', properties.adresse)}
-        ${popupDetail('Municipality', properties.kommunenavn)}
+        ${popupDetail('Address', properties.adresse, POPUP_HELP.address)}
+        ${popupDetail('Municipality', properties.kommunenavn, POPUP_HELP.municipality)}
         ${popupDetail('Gård', properties.gard)}
-        ${popupDetail('Bruk', properties.bruksnummer)}
-        ${popupDetail('Feste', properties.feste)}
-        ${popupDetail('Andel', properties.andel)}
-        ${popupDetail('Seksjon', properties.seksjon)}
-        ${popupDetail('Organisation no.', properties.organisasjonsNr)}
-        ${popupDetail('Certificate no.', properties.attestnummer)}
-        ${popupDetail('Issued', properties.utstedelsesdato)}
-        ${popupDetail('Heating grade', properties.oppvarmingskarakter)}
-        ${popupDetail('Material', properties.materialvalg)}
+        ${popupDetail('Bruk', properties.bruksnummer, POPUP_HELP.bruk)}
+        ${popupDetail('Feste', properties.feste, POPUP_HELP.feste)}
+        ${popupDetail('Andel', properties.andel, POPUP_HELP.andel)}
+        ${popupDetail('Seksjon', properties.seksjon, POPUP_HELP.seksjon)}
+        ${popupDetail('Organisation no.', properties.organisasjonsNr, POPUP_HELP.organisation)}
+        ${popupDetail('Certificate no.', properties.attestnummer, POPUP_HELP.certificate)}
+        ${popupDetail('Issued', properties.utstedelsesdato, POPUP_HELP.issued)}
+        ${popupDetail('Heating grade', properties.oppvarmingskarakter, POPUP_HELP.heatingGrade)}
+        ${popupDetail('Material', properties.materialvalg, POPUP_HELP.material)}
       </div>
     </div>
   `;
@@ -140,6 +169,14 @@ function findUnitsAtFeatureLocation(features, selectedFeature) {
       const rightUnit = right.properties?.bruksenhetsNr || '';
       return leftUnit.localeCompare(rightUnit, undefined, { numeric: true });
     });
+}
+
+function findUnitsAtCoordinates(features, coordinates) {
+  return findUnitsAtFeatureLocation(features, {
+    geometry: {
+      coordinates
+    }
+  });
 }
 
 function median(values) {
@@ -230,11 +267,11 @@ function heatmapWeightExpression(stats) {
     0,
     0,
     stats.p50,
-    0.22,
+    0.12,
     stats.p80,
-    0.52,
+    0.22,
     stats.p95,
-    0.9
+    0.34
   ];
 }
 
@@ -242,7 +279,7 @@ function heatmapPointColorExpression(stats) {
   return [
     'interpolate',
     ['linear'],
-    ['coalesce', ['get', 'heatmapEnergy'], 0],
+    ['coalesce', ['get', 'energibruk_kwh_m2'], ['get', 'heatmapEnergy'], 0],
     0,
     '#7dd3fc',
     stats.p50,
@@ -407,23 +444,26 @@ function formatEnergy(value) {
 
 function MapLegend({ heatmapStats }) {
   const viewMode = useStore((state) => state.viewMode);
+  const heatmapStart = formatEnergy(heatmapStats.p50);
+  const heatmapEnd = `${formatEnergy(heatmapStats.p95)}+`;
 
   return (
     <div className="map-legend">
-      <div className="legend-kicker">Legend</div>
+      <div className="legend-kicker">Information card</div>
       {viewMode === 'heatmap' ? (
         <>
+          <div className="legend-copy">Energy use per building location</div>
           <div className="legend-gradient" />
           <div className="legend-scale">
-            <span>Low</span>
-            <span>Extreme</span>
+            <span>
+              <strong>{heatmapStart}</strong>
+              <small>lower</small>
+            </span>
+            <span>
+              <strong>{heatmapEnd}</strong>
+              <small>higher</small>
+            </span>
           </div>
-          <div className="legend-breaks">
-            <span>Typical {formatEnergy(heatmapStats.p50)}</span>
-            <span>High {formatEnergy(heatmapStats.p80)}</span>
-            <span>Extreme {formatEnergy(heatmapStats.p95)}+</span>
-          </div>
-          <div className="legend-copy">Each building location is colored by median energy use.</div>
         </>
       ) : (
         <div className="legend-list">
@@ -499,46 +539,48 @@ function addMapLayers(map) {
     id: LAYER_IDS.heatmap,
     type: 'heatmap',
     source: SOURCE_IDS.heatmapBuildings,
-    maxzoom: 15,
+    maxzoom: 22,
     layout: { visibility: 'none' },
     paint: {
-      'heatmap-weight': ['interpolate', ['linear'], ['coalesce', ['get', 'energibruk_kwh_m2'], 0], 0, 0, 60, 0.18, 180, 0.5, 420, 0.82],
-      'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 5, 0.2, 9, 0.55, 13, 0.85],
+      'heatmap-weight': ['interpolate', ['linear'], ['coalesce', ['get', 'heatmapEnergy'], 0], 0, 0, 60, 0.12, 180, 0.22, 420, 0.34],
+      'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 4, 0.26, 8, 0.38, 12, 0.52, 16, 0.62],
       'heatmap-color': [
         'interpolate',
         ['linear'],
         ['heatmap-density'],
         0,
         'rgba(56, 189, 248, 0)',
-        0.18,
-        'rgba(125, 211, 252, 0.34)',
-        0.38,
-        'rgba(45, 212, 191, 0.44)',
-        0.58,
-        'rgba(163, 230, 53, 0.5)',
-        0.76,
-        'rgba(253, 224, 71, 0.56)',
-        0.92,
-        'rgba(253, 186, 116, 0.6)',
+        0.22,
+        'rgba(125, 211, 252, 0.42)',
+        0.46,
+        'rgba(45, 212, 191, 0.5)',
+        0.68,
+        'rgba(163, 230, 53, 0.56)',
+        0.84,
+        'rgba(253, 224, 71, 0.64)',
+        0.96,
+        'rgba(253, 186, 116, 0.7)',
         1,
-        'rgba(239, 68, 68, 0.72)'
+        'rgba(239, 68, 68, 0.78)'
       ],
-      'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 4, 26, 8, 44, 13, 72],
-      'heatmap-opacity': 0.58
+      'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 4, 10, 8, 14, 12, 20, 18, 30],
+      'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.52, 9, 0.66, 16, 0.72, 20, 0.5]
     }
   });
 
   map.addLayer({
     id: LAYER_IDS.heatmapPoints,
     type: 'circle',
-    source: SOURCE_IDS.heatmapBuildings,
+    source: SOURCE_IDS.buildings,
+    filter: ['!', ['has', 'point_count']],
+    minzoom: 13,
     layout: { visibility: 'none' },
     paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 3.5, 10, 5.5, 14, 8],
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 2.4, 8, 3.2, 12, 5.4, 15, 7.2],
       'circle-color': '#2dd4bf',
-      'circle-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0.55, 10, 0.72, 14, 0.86],
+      'circle-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.68, 8, 0.74, 12, 0.82, 15, 0.9],
       'circle-stroke-color': 'rgba(255, 255, 255, 0.86)',
-      'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 5, 0.4, 12, 1.2]
+      'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 4, 0.2, 12, 1.1]
     }
   });
 
@@ -744,6 +786,26 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
         );
       });
 
+      map.on('click', LAYER_IDS.heatmapPoints, (event) => {
+        const feature = event.features?.[0];
+        if (!feature) return;
+
+        const selected = findFeatureById(allFeaturesRef.current, feature.properties.id);
+        const unitsAtLocation = selected ? findUnitsAtFeatureLocation(allFeaturesRef.current, selected) : [];
+        const coordinates = selected?.geometry?.coordinates?.slice() || feature.geometry.coordinates.slice();
+        const address = selected?.properties?.adresse || feature.properties.adresse || 'Unknown address';
+
+        setSelectedFeature(selected || null);
+        popupRef.current?.remove();
+        popupRef.current = openPopup(
+          map,
+          coordinates,
+          unitsAtLocation.length > 1
+            ? nearbyUnitsListHtml(unitsToListPayload(unitsAtLocation), address, coordinates)
+            : popupHtml(selected?.properties || feature.properties)
+        );
+      });
+
       // Add delegated click handler for unit selection at the document level
       const handleUnitSelection = (e) => {
         const unitItem = e.target.closest('.nearby-unit-item');
@@ -839,7 +901,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
       });
 
       map.on('click', (event) => {
-        const hits = map.queryRenderedFeatures(event.point, { layers: [LAYER_IDS.clusters, LAYER_IDS.points, LAYER_IDS.nearby] });
+        const hits = map.queryRenderedFeatures(event.point, { layers: [LAYER_IDS.clusters, LAYER_IDS.points, LAYER_IDS.heatmapPoints, LAYER_IDS.nearby] });
         if (hits.length > 0) return;
         popupRef.current?.remove();
         popupRef.current = null;
@@ -852,7 +914,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
         });
       });
 
-      [LAYER_IDS.clusters, LAYER_IDS.points, LAYER_IDS.nearby].forEach((layerId) => {
+      [LAYER_IDS.clusters, LAYER_IDS.points, LAYER_IDS.heatmapPoints, LAYER_IDS.nearby].forEach((layerId) => {
         map.on('mouseenter', layerId, () => {
           map.getCanvas().style.cursor = 'pointer';
         });
