@@ -16,8 +16,8 @@
 
 .search-wrapper {
   position: relative;
-  width: min(46vw, 34rem);
-  min-width: min(22rem, 46vw);
+  width: min(32.2vw, 23.8rem);
+  min-width: min(15.4rem, 32.2vw);
 }
 
 .chrome-button,
