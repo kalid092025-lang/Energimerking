@@ -3,6 +3,8 @@
   justify-content: flex-start;
   align-items: flex-start;
   gap: 10px;
+  width: fit-content;
+  max-width: calc(100vw - 24px);
 }
 
 .search-left {
@@ -150,6 +152,7 @@
 @media (max-width: 700px) {
   .search-layout {
     align-items: stretch;
+    width: 100%;
   }
 
   .search-left {

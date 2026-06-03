@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
+import { Flame, Layers, MapPin, TrendingUp } from 'lucide-react';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useStore } from '../store/useStore.js';
 import { buildFeatureCollection, buildNearbyCircleGeoJson, buildNearbyGeoJson } from '../utils/geo.js';
@@ -614,6 +615,43 @@ function MapLegend({ heatmapStats }) {
           </div>
         )
       )}
+    </div>
+  );
+}
+
+const MODE_DOCK_ITEMS = [
+  { value: 'markers', label: 'Markers', Icon: MapPin },
+  { value: 'heatmap', label: 'Heatmap', Icon: Flame },
+  { value: 'tiles', label: 'Tiles', Icon: Layers },
+  { value: 'upgrade', label: 'Upgrade priority', Icon: TrendingUp }
+];
+
+function CollapsedModeDock() {
+  const sidebarOpen = useStore((state) => state.sidebarOpen);
+  const viewMode = useStore((state) => state.viewMode);
+  const setViewMode = useStore((state) => state.setViewMode);
+
+  if (sidebarOpen) return null;
+
+  return (
+    <div className="collapsed-mode-dock" aria-label="Map view modes">
+      {MODE_DOCK_ITEMS.map((item) => {
+        const Icon = item.Icon;
+
+        return (
+          <button
+            key={item.value}
+            type="button"
+            className={`collapsed-mode-button ${viewMode === item.value ? 'active' : ''}`}
+            onClick={() => setViewMode(item.value)}
+            aria-label={item.label}
+            aria-pressed={viewMode === item.value}
+            title={item.label}
+          >
+            <Icon className="mode-icon" aria-hidden="true" strokeWidth={2.2} />
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -1284,6 +1322,13 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
   return (
     <div className="map-shell">
       <div ref={mapContainerRef} className="map-canvas" />
+      <CollapsedModeDock />
+      <div className="zoom-readout">
+        Zoom {zoomLevel.toFixed(1)}
+        {viewMode === 'tiles' && zoomLevel < 10 && (
+          <span>Tiles appear at 10+</span>
+        )}
+      </div>
       <div className="map-floating">
         <MapLegend heatmapStats={heatmapData.stats} />
         {nearbySearchEnabled && (
@@ -1301,12 +1346,6 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
             <strong>{nearbyState.results.length}</strong> nearby loaded coordinates
           </div>
         )}
-        <div className="map-pill zoom-pill">
-          Zoom <strong>{zoomLevel.toFixed(1)}</strong>
-          {viewMode === 'tiles' && zoomLevel < 10 && (
-            <span>Tiles appear at 10+</span>
-          )}
-        </div>
       </div>
     </div>
   );
