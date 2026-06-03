@@ -427,6 +427,10 @@
   font-size: 0.88rem;
 }
 
+.view-mode-select {
+  margin-top: 12px;
+}
+
 .checkbox-filter-list {
   display: grid;
   grid-template-columns: 1fr;

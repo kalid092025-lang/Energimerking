@@ -184,16 +184,17 @@ function Filters() {
             <div className="section-kicker">View mode</div>
           </div>
         </div>
-        <div className="segment-control">
-          <button type="button" className={viewMode === 'markers' ? 'active' : ''} onClick={() => setViewMode('markers')}>
-            Markers
-          </button>
-          <button type="button" className={viewMode === 'heatmap' ? 'active' : ''} onClick={() => setViewMode('heatmap')}>
-            Heatmap
-          </button>
-          <button type="button" className={viewMode === 'tiles' ? 'active' : ''} onClick={() => setViewMode('tiles')}>
-            Tiles
-          </button>
+        <div className="filter-group view-mode-select">
+          <select
+            aria-label="View mode"
+            value={viewMode}
+            onChange={(event) => setViewMode(event.target.value)}
+          >
+            <option value="markers">Markers</option>
+            <option value="heatmap">Heatmap</option>
+            <option value="tiles">Tiles</option>
+            <option value="upgrade">Upgrade priority</option>
+          </select>
         </div>
       </section>
 

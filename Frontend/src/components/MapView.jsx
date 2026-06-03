@@ -146,6 +146,110 @@ function popupHtml(properties) {
   `;
 }
 
+function priorityClass(score) {
+  if (score >= 75) return 'priority-high';
+  if (score >= 45) return 'priority-medium';
+  return 'priority-low';
+}
+
+function priorityLabel(score) {
+  if (score >= 75) return 'High priority';
+  if (score >= 45) return 'Medium priority';
+  return 'Low priority';
+}
+
+function scoreBar(label, score) {
+  const safeScore = Math.max(0, Math.min(100, Number(score) || 0));
+
+  return `
+    <div class="score-row">
+      <div class="score-row-label">
+        <span>${escapeHtml(label)}</span>
+        <strong>${safeScore}/100</strong>
+      </div>
+      <div class="score-track">
+        <div class="score-fill ${priorityClass(safeScore)}" style="width: ${safeScore}%"></div>
+      </div>
+    </div>
+  `;
+}
+
+function upgradeRecommendations(properties) {
+  const energyGrade = String(properties.energikarakter || '').trim().toUpperCase();
+  const heatingGrade = String(properties.oppvarmingskarakter || '').trim().toUpperCase();
+  const energyUse = Number(properties.energibruk_kwh_m2 ?? properties.beregnetLevertEnergiTotaltkWhm2);
+  const recommendations = [];
+
+  if (['E', 'F', 'G'].includes(energyGrade) || energyUse >= 300) {
+    recommendations.push('Check insulation, windows, ventilation heat recovery, and air leakage first.');
+  } else if (['C', 'D'].includes(energyGrade) || energyUse >= 180) {
+    recommendations.push('Look for medium upgrades: attic insulation, window improvements, and smarter ventilation.');
+  } else {
+    recommendations.push('Energy performance looks relatively strong; focus on smaller efficiency wins.');
+  }
+
+  if (['RED', 'ORANGE'].includes(heatingGrade)) {
+    recommendations.push('Prioritize heating upgrades such as heat pump, district heating, or another renewable/non-direct-electric source.');
+  } else if (heatingGrade === 'YELLOW') {
+    recommendations.push('Heating is partly renewable; compare whether a larger renewable share would improve the certificate.');
+  } else {
+    recommendations.push('Heating grade is already strong; energy envelope upgrades may matter more.');
+  }
+
+  if (Number(properties.byggeaar) && Number(properties.byggeaar) < 1987) {
+    recommendations.push('Older building year suggests checking envelope upgrades before expensive system changes.');
+  }
+
+  return recommendations;
+}
+
+function upgradePopupHtml(properties) {
+  const address = escapeHtml(displayValue(properties.adresse, 'Unknown address'));
+  const energyUse = properties.beregnetLevertEnergiTotaltkWhm2 ?? properties.energibruk_kwh_m2;
+  const score = Math.max(0, Math.min(100, Number(properties.upgradeScore) || 0));
+  const priority = properties.upgradePriority || priorityLabel(score);
+  const recommendations = upgradeRecommendations(properties)
+    .map((item) => `<li>${escapeHtml(item)}</li>`)
+    .join('');
+
+  return `
+    <div class="popup-card popup-card-upgrade">
+      <div class="popup-header">
+        <div class="popup-heading">
+          <div class="popup-kicker">Upgrade priority</div>
+          <div class="popup-title">${address}</div>
+          <div class="popup-subtitle">Estimated score based on grade, heating, energy use, and age.</div>
+        </div>
+        <div class="priority-badge ${priorityClass(score)}">
+          <span>${escapeHtml(priority)}</span>
+          <strong>${score}</strong>
+        </div>
+      </div>
+
+      <div class="popup-metrics">
+        ${popupMetric('Energy grade', properties.energikarakter, 'popup-metric-compact', POPUP_HELP.grade)}
+        ${popupMetric('Heating grade', properties.oppvarmingskarakter, 'popup-metric-compact', POPUP_HELP.heatingGrade)}
+        ${popupMetric('Energy use', energyUse, 'popup-metric-compact', POPUP_HELP.energyUse)}
+      </div>
+
+      <div class="score-breakdown">
+        ${scoreBar('Total priority', score)}
+        ${scoreBar('Energy upgrade need', properties.energyUpgradeScore)}
+        ${scoreBar('Heating upgrade need', properties.heatingUpgradeScore)}
+      </div>
+
+      <div class="upgrade-actions">
+        <div class="popup-kicker">What to look at</div>
+        <ul>${recommendations}</ul>
+      </div>
+    </div>
+  `;
+}
+
+function popupHtmlForMode(properties, mode) {
+  return mode === 'upgrade' ? upgradePopupHtml(properties) : popupHtml(properties);
+}
+
 function tilePropertiesToPopupProperties(properties = {}) {
   return {
     id: properties.id,
@@ -485,6 +589,21 @@ function MapLegend({ heatmapStats }) {
             <div className="legend-item"><span className="legend-dot dot-building" />Backend vector tile buildings</div>
             <div className="legend-copy">Colored by energy grade from the tile properties.</div>
           </div>
+        ) : viewMode === 'upgrade' ? (
+          <>
+            <div className="legend-copy">Upgrade priority score</div>
+            <div className="legend-gradient priority-gradient" />
+            <div className="legend-scale">
+              <span>
+                <strong>Low</strong>
+                <small>better condition</small>
+              </span>
+              <span>
+                <strong>High</strong>
+                <small>fix first</small>
+              </span>
+            </div>
+          </>
         ) : (
           <div className="legend-list">
             <div className="legend-item"><span className="legend-dot dot-cluster-small" />Small cluster</div>
@@ -509,6 +628,11 @@ function addMapLayers(map) {
   });
 
   map.addSource(SOURCE_IDS.heatmapBuildings, {
+    type: 'geojson',
+    data: buildFeatureCollection([])
+  });
+
+  map.addSource(SOURCE_IDS.upgradeBuildings, {
     type: 'geojson',
     data: buildFeatureCollection([])
   });
@@ -609,6 +733,32 @@ function addMapLayers(map) {
       'circle-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.68, 8, 0.74, 12, 0.82, 15, 0.9],
       'circle-stroke-color': 'rgba(255, 255, 255, 0.86)',
       'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 4, 0.2, 12, 1.1]
+    }
+  });
+
+  map.addLayer({
+    id: LAYER_IDS.upgradePriorityPoints,
+    type: 'circle',
+    source: SOURCE_IDS.upgradeBuildings,
+    layout: { visibility: 'none' },
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 4, 12, 8, 16, 10],
+      'circle-color': [
+        'interpolate',
+        ['linear'],
+        ['coalesce', ['get', 'upgradeScore'], 0],
+        0,
+        '#22c55e',
+        45,
+        '#facc15',
+        75,
+        '#f97316',
+        100,
+        '#dc2626'
+      ],
+      'circle-opacity': 0.9,
+      'circle-stroke-color': '#ffffff',
+      'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 5, 0.8, 14, 1.6]
     }
   });
 
@@ -803,6 +953,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
       addMapLayers(map);
       map.getSource(SOURCE_IDS.buildings).setData(featureCollectionRef.current);
       map.getSource(SOURCE_IDS.heatmapBuildings).setData(heatmapCollectionRef.current);
+      map.getSource(SOURCE_IDS.upgradeBuildings).setData(featureCollectionRef.current);
       map.getSource(SOURCE_IDS.nearby).setData(nearbyCollectionRef.current);
       map.getSource(SOURCE_IDS.nearbyCircle).setData(nearbyCircleCollectionRef.current);
       map.setPaintProperty(
@@ -819,11 +970,13 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
       const markerVisibility = viewModeRef.current === 'markers' ? 'visible' : 'none';
       const heatmapVisibility = viewModeRef.current === 'heatmap' ? 'visible' : 'none';
       const tileVisibility = viewModeRef.current === 'tiles' ? 'visible' : 'none';
+      const upgradeVisibility = viewModeRef.current === 'upgrade' ? 'visible' : 'none';
       map.setLayoutProperty(LAYER_IDS.clusters, 'visibility', markerVisibility);
       map.setLayoutProperty(LAYER_IDS.clusterCount, 'visibility', markerVisibility);
       map.setLayoutProperty(LAYER_IDS.points, 'visibility', markerVisibility);
       map.setLayoutProperty(LAYER_IDS.heatmap, 'visibility', heatmapVisibility);
       map.setLayoutProperty(LAYER_IDS.heatmapPoints, 'visibility', heatmapVisibility);
+      map.setLayoutProperty(LAYER_IDS.upgradePriorityPoints, 'visibility', upgradeVisibility);
       map.setLayoutProperty(LAYER_IDS.energyTilePoints, 'visibility', tileVisibility);
 
       if (selectedFeatureRef.current) {
@@ -854,7 +1007,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
           coordinates,
           unitsAtLocation.length > 1
             ? nearbyUnitsListHtml(unitsToListPayload(unitsAtLocation), address, coordinates)
-            : popupHtml(selected?.properties || feature.properties)
+            : popupHtmlForMode(selected?.properties || feature.properties, 'markers')
         );
       });
 
@@ -874,7 +1027,27 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
           coordinates,
           unitsAtLocation.length > 1
             ? nearbyUnitsListHtml(unitsToListPayload(unitsAtLocation), address, coordinates)
-            : popupHtml(selected?.properties || feature.properties)
+            : popupHtmlForMode(selected?.properties || feature.properties, 'heatmap')
+        );
+      });
+
+      map.on('click', LAYER_IDS.upgradePriorityPoints, (event) => {
+        const feature = event.features?.[0];
+        if (!feature) return;
+
+        const selected = findFeatureById(allFeaturesRef.current, feature.properties.id);
+        const unitsAtLocation = selected ? findUnitsAtFeatureLocation(allFeaturesRef.current, selected) : [];
+        const coordinates = selected?.geometry?.coordinates?.slice() || feature.geometry.coordinates.slice();
+        const address = selected?.properties?.adresse || feature.properties.adresse || 'Unknown address';
+
+        setSelectedFeature(selected || null);
+        popupRef.current?.remove();
+        popupRef.current = openPopup(
+          map,
+          coordinates,
+          unitsAtLocation.length > 1
+            ? nearbyUnitsListHtml(unitsToListPayload(unitsAtLocation), address, coordinates)
+            : popupHtmlForMode(selected?.properties || feature.properties, 'upgrade')
         );
       });
 
@@ -919,7 +1092,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
             popupRef.current = openPopup(
               map,
               [parseFloat(lng) || 0, parseFloat(lat) || 0],
-              popupHtml(selected.properties)
+              popupHtmlForMode(selected.properties, viewModeRef.current)
             );
           }, 100);
         }
@@ -986,7 +1159,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
       });
 
       map.on('click', (event) => {
-        const hits = map.queryRenderedFeatures(event.point, { layers: [LAYER_IDS.clusters, LAYER_IDS.points, LAYER_IDS.heatmapPoints, LAYER_IDS.energyTilePoints, LAYER_IDS.nearby] });
+        const hits = map.queryRenderedFeatures(event.point, { layers: [LAYER_IDS.clusters, LAYER_IDS.points, LAYER_IDS.heatmapPoints, LAYER_IDS.upgradePriorityPoints, LAYER_IDS.energyTilePoints, LAYER_IDS.nearby] });
         if (hits.length > 0) return;
         popupRef.current?.remove();
         popupRef.current = null;
@@ -999,7 +1172,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
         });
       });
 
-      [LAYER_IDS.clusters, LAYER_IDS.points, LAYER_IDS.heatmapPoints, LAYER_IDS.energyTilePoints, LAYER_IDS.nearby].forEach((layerId) => {
+      [LAYER_IDS.clusters, LAYER_IDS.points, LAYER_IDS.heatmapPoints, LAYER_IDS.upgradePriorityPoints, LAYER_IDS.energyTilePoints, LAYER_IDS.nearby].forEach((layerId) => {
         map.on('mouseenter', layerId, () => {
           map.getCanvas().style.cursor = 'pointer';
         });
@@ -1024,18 +1197,22 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
     if (!map?.isStyleLoaded()) return;
     const source = map.getSource(SOURCE_IDS.buildings);
     const heatmapSource = map.getSource(SOURCE_IDS.heatmapBuildings);
+    const upgradeSource = map.getSource(SOURCE_IDS.upgradeBuildings);
     if (source) source.setData(featureCollection);
     if (heatmapSource) heatmapSource.setData(heatmapData.collection);
+    if (upgradeSource) upgradeSource.setData(featureCollection);
     map.setPaintProperty(LAYER_IDS.heatmap, 'heatmap-weight', heatmapWeightExpression(heatmapData.stats));
     map.setPaintProperty(LAYER_IDS.heatmapPoints, 'circle-color', heatmapPointColorExpression(heatmapData.stats));
     const markerVisibility = viewMode === 'markers' ? 'visible' : 'none';
     const heatmapVisibility = viewMode === 'heatmap' ? 'visible' : 'none';
     const tileVisibility = viewMode === 'tiles' ? 'visible' : 'none';
+    const upgradeVisibility = viewMode === 'upgrade' ? 'visible' : 'none';
     map.setLayoutProperty(LAYER_IDS.clusters, 'visibility', markerVisibility);
     map.setLayoutProperty(LAYER_IDS.clusterCount, 'visibility', markerVisibility);
     map.setLayoutProperty(LAYER_IDS.points, 'visibility', markerVisibility);
     map.setLayoutProperty(LAYER_IDS.heatmap, 'visibility', heatmapVisibility);
     map.setLayoutProperty(LAYER_IDS.heatmapPoints, 'visibility', heatmapVisibility);
+    map.setLayoutProperty(LAYER_IDS.upgradePriorityPoints, 'visibility', upgradeVisibility);
     map.setLayoutProperty(LAYER_IDS.energyTilePoints, 'visibility', tileVisibility);
   }, [featureCollection, heatmapData, viewMode]);
 

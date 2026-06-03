@@ -4,6 +4,7 @@ export const DEFAULT_ZOOM = 5.2;
 
 export const SOURCE_IDS = {
   buildings: 'buildings',
+  upgradeBuildings: 'upgrade-buildings',
   heatmapBuildings: 'heatmap-buildings',
   energyTiles: 'energy-tiles',
   selected: 'selected-building',
@@ -17,6 +18,7 @@ export const LAYER_IDS = {
   points: 'unclustered-points',
   heatmap: 'buildings-heatmap',
   heatmapPoints: 'buildings-heatmap-points',
+  upgradePriorityPoints: 'upgrade-priority-points',
   energyTilePoints: 'energy-tile-points',
   selectedHalo: 'selected-building-halo',
   selectedPoint: 'selected-building-point',

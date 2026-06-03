@@ -111,6 +111,49 @@ const UNIT_NUMBER_KEYS = [
   'Bruksenhetsnummer'
 ];
 
+const ENERGY_GRADE_UPGRADE_SCORES = {
+  A: 0,
+  B: 10,
+  C: 25,
+  D: 45,
+  E: 65,
+  F: 85,
+  G: 100
+};
+
+const HEATING_GRADE_UPGRADE_SCORES = {
+  GREEN: 0,
+  YELLOW: 35,
+  ORANGE: 70,
+  RED: 100
+};
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function normalizeGrade(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function buildUpgradeScores(properties) {
+  const energyGradeScore = ENERGY_GRADE_UPGRADE_SCORES[normalizeGrade(properties.energikarakter)] ?? 50;
+  const heatingGradeScore = HEATING_GRADE_UPGRADE_SCORES[normalizeGrade(properties.oppvarmingskarakter)] ?? 50;
+  const energyUseScore = clamp((Number(properties.energibruk_kwh_m2) || 0) / 2000 * 100, 0, 100);
+  const buildYear = Number(properties.byggeaar);
+  const ageScore = Number.isFinite(buildYear) ? clamp((2026 - buildYear) / 126 * 100, 0, 100) : 50;
+  const energyUpgradeScore = Math.round((energyGradeScore * 0.45) + (energyUseScore * 0.35) + (ageScore * 0.2));
+  const heatingUpgradeScore = Math.round((heatingGradeScore * 0.7) + (energyUseScore * 0.2) + (ageScore * 0.1));
+  const upgradeScore = Math.round((energyUpgradeScore * 0.55) + (heatingUpgradeScore * 0.45));
+
+  return {
+    energyUpgradeScore,
+    heatingUpgradeScore,
+    upgradeScore,
+    upgradePriority: upgradeScore >= 75 ? 'High' : upgradeScore >= 45 ? 'Medium' : 'Low'
+  };
+}
+
 function firstUnitNumber(sources, eiendommer) {
   const directValue = firstNestedValue(sources, UNIT_NUMBER_KEYS);
   if (directValue) {
@@ -249,7 +292,10 @@ function normalizeProperties(rawProperties = {}, coordinates = []) {
     // Nested certificate data is best-effort.
   }
 
-  return normalized;
+  return {
+    ...normalized,
+    ...buildUpgradeScores(normalized)
+  };
 }
 
 function normalizeUnitFeature(feature, unitProperties, parentId, unitIndex) {
