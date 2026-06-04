@@ -259,6 +259,75 @@
   max-width: 520px;
 }
 
+.theme-dark .maplibregl-popup-content {
+  background: #202124;
+  color: #e8eaed;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.46);
+}
+
+.theme-dark .maplibregl-popup-tip {
+  border-top-color: #202124;
+  border-bottom-color: #202124;
+}
+
+.theme-dark .maplibregl-popup-close-button {
+  color: #e8eaed;
+}
+
+.theme-dark .popup-card,
+.theme-dark .popup-card-small,
+.theme-dark .popup-card-units {
+  background: #202124;
+  color: #e8eaed;
+}
+
+.theme-dark .popup-title,
+.theme-dark .popup-value,
+.theme-dark .popup-detail strong,
+.theme-dark .popup-metric-value,
+.theme-dark .popup-metric strong,
+.theme-dark .score-row-label strong,
+.theme-dark .nearby-unit-title {
+  color: #f8fafc;
+}
+
+.theme-dark .popup-kicker,
+.theme-dark .popup-subtitle,
+.theme-dark .popup-label,
+.theme-dark .popup-detail span,
+.theme-dark .popup-metric span,
+.theme-dark .score-row-label,
+.theme-dark .nearby-unit-location,
+.theme-dark .nearby-unit-distance,
+.theme-dark .upgrade-actions ul {
+  color: #cbd5e1;
+}
+
+.theme-dark .popup-metric,
+.theme-dark .score-breakdown,
+.theme-dark .nearby-unit-item {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.theme-dark .nearby-unit-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: #8ab4f8;
+}
+
+.theme-dark .popup-details,
+.theme-dark .upgrade-actions {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.theme-dark .popup-detail {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.theme-dark .score-track {
+  background: rgba(255, 255, 255, 0.12);
+}
+
 .popup-card-upgrade {
   overflow-y: auto;
   overscroll-behavior: contain;

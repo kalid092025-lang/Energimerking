@@ -5,12 +5,13 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { useStore } from '../store/useStore.js';
 import { buildFeatureCollection, buildNearbyCircleGeoJson, buildNearbyGeoJson } from '../utils/geo.js';
 import {
+  DARK_MAP_STYLE_URL,
   DEFAULT_CENTER,
   DEFAULT_ZOOM,
   ENERGY_TILE_SOURCE_LAYER,
   ENERGY_TILE_URL,
   LAYER_IDS,
-  MAP_STYLE_URL,
+  LIGHT_MAP_STYLE_URL,
   SOURCE_IDS
 } from '../utils/constants.js';
 import '../styles/map-view.css';
@@ -231,6 +232,7 @@ function upgradePopupHtml(properties) {
         ${popupMetric('Energy grade', properties.energikarakter, 'popup-metric-compact', POPUP_HELP.grade)}
         ${popupMetric('Heating grade', properties.oppvarmingskarakter, 'popup-metric-compact', POPUP_HELP.heatingGrade)}
         ${popupMetric('Energy use', energyUse, 'popup-metric-compact', POPUP_HELP.energyUse)}
+        ${popupMetric('Built', properties.byggeaar, 'popup-metric-compact', POPUP_HELP.built)}
       </div>
 
       <div class="score-breakdown">
@@ -553,6 +555,11 @@ function openPopup(map, coordinates, html) {
     .setHTML(html)
     .addTo(map);
 
+  popup._energimerkingState = {
+    coordinates: Array.isArray(coordinates) ? coordinates.slice() : [coordinates.lng, coordinates.lat],
+    html
+  };
+
   keepPopupInView(map, popup);
   return popup;
 }
@@ -655,8 +662,75 @@ function CollapsedModeDock() {
   );
 }
 
+function mapStyleUrlForTheme(theme) {
+  return theme === 'dark' ? DARK_MAP_STYLE_URL : LIGHT_MAP_STYLE_URL;
+}
+
+function setLayerVisibility(map, layerId, visibility) {
+  if (map.getLayer(layerId)) {
+    map.setLayoutProperty(layerId, 'visibility', visibility);
+  }
+}
+
+function syncMapDataAndVisibility(map, {
+  featureCollection,
+  heatmapCollection,
+  heatmapStats,
+  nearbyCollection,
+  nearbyCircleCollection,
+  selectedFeature,
+  viewMode
+}) {
+  if (!map?.isStyleLoaded()) return;
+
+  map.getSource(SOURCE_IDS.buildings)?.setData(featureCollection);
+  map.getSource(SOURCE_IDS.heatmapBuildings)?.setData(heatmapCollection);
+  map.getSource(SOURCE_IDS.upgradeBuildings)?.setData(featureCollection);
+  map.getSource(SOURCE_IDS.nearby)?.setData(nearbyCollection);
+  map.getSource(SOURCE_IDS.nearbyCircle)?.setData(nearbyCircleCollection);
+  map.getSource(SOURCE_IDS.selected)?.setData(
+    selectedFeature ? buildFeatureCollection([selectedFeature]) : buildFeatureCollection([])
+  );
+
+  if (map.getLayer(LAYER_IDS.heatmap)) {
+    map.setPaintProperty(LAYER_IDS.heatmap, 'heatmap-weight', heatmapWeightExpression(heatmapStats));
+  }
+  if (map.getLayer(LAYER_IDS.heatmapPoints)) {
+    map.setPaintProperty(LAYER_IDS.heatmapPoints, 'circle-color', heatmapPointColorExpression(heatmapStats));
+  }
+  if (map.getLayer(LAYER_IDS.heatmapLocations)) {
+    map.setPaintProperty(LAYER_IDS.heatmapLocations, 'circle-color', heatmapPointColorExpression(heatmapStats));
+  }
+
+  const markerVisibility = viewMode === 'markers' ? 'visible' : 'none';
+  const heatmapVisibility = viewMode === 'heatmap' ? 'visible' : 'none';
+  const tileVisibility = viewMode === 'tiles' ? 'visible' : 'none';
+  const upgradeVisibility = viewMode === 'upgrade' ? 'visible' : 'none';
+
+  setLayerVisibility(map, LAYER_IDS.clusters, markerVisibility);
+  setLayerVisibility(map, LAYER_IDS.clusterCount, markerVisibility);
+  setLayerVisibility(map, LAYER_IDS.points, markerVisibility);
+  setLayerVisibility(map, LAYER_IDS.heatmap, heatmapVisibility);
+  setLayerVisibility(map, LAYER_IDS.heatmapLocations, heatmapVisibility);
+  setLayerVisibility(map, LAYER_IDS.heatmapPoints, heatmapVisibility);
+  setLayerVisibility(map, LAYER_IDS.upgradePriorityPoints, upgradeVisibility);
+  setLayerVisibility(map, LAYER_IDS.energyTilePoints, tileVisibility);
+}
+
+function addSourceIfMissing(map, sourceId, source) {
+  if (!map.getSource(sourceId)) {
+    map.addSource(sourceId, source);
+  }
+}
+
+function addLayerIfMissing(map, layer) {
+  if (!map.getLayer(layer.id)) {
+    map.addLayer(layer);
+  }
+}
+
 function addMapLayers(map) {
-  map.addSource(SOURCE_IDS.buildings, {
+  addSourceIfMissing(map, SOURCE_IDS.buildings, {
     type: 'geojson',
     data: buildFeatureCollection([]),
     cluster: true,
@@ -664,24 +738,24 @@ function addMapLayers(map) {
     clusterMaxZoom: 13
   });
 
-  map.addSource(SOURCE_IDS.heatmapBuildings, {
+  addSourceIfMissing(map, SOURCE_IDS.heatmapBuildings, {
     type: 'geojson',
     data: buildFeatureCollection([])
   });
 
-  map.addSource(SOURCE_IDS.upgradeBuildings, {
+  addSourceIfMissing(map, SOURCE_IDS.upgradeBuildings, {
     type: 'geojson',
     data: buildFeatureCollection([])
   });
 
-  map.addSource(SOURCE_IDS.energyTiles, {
+  addSourceIfMissing(map, SOURCE_IDS.energyTiles, {
     type: 'vector',
     tiles: [ENERGY_TILE_URL],
     minzoom: 10,
     maxzoom: 18
   });
 
-  map.addLayer({
+  addLayerIfMissing(map, {
     id: LAYER_IDS.clusters,
     type: 'circle',
     source: SOURCE_IDS.buildings,
@@ -695,7 +769,7 @@ function addMapLayers(map) {
     }
   });
 
-  map.addLayer({
+  addLayerIfMissing(map, {
     id: LAYER_IDS.clusterCount,
     type: 'symbol',
     source: SOURCE_IDS.buildings,
@@ -710,7 +784,7 @@ function addMapLayers(map) {
     }
   });
 
-  map.addLayer({
+  addLayerIfMissing(map, {
     id: LAYER_IDS.points,
     type: 'circle',
     source: SOURCE_IDS.buildings,
@@ -724,7 +798,7 @@ function addMapLayers(map) {
     }
   });
 
-  map.addLayer({
+  addLayerIfMissing(map, {
     id: LAYER_IDS.heatmap,
     type: 'heatmap',
     source: SOURCE_IDS.heatmapBuildings,
@@ -757,7 +831,7 @@ function addMapLayers(map) {
     }
   });
 
-  map.addLayer({
+  addLayerIfMissing(map, {
     id: LAYER_IDS.heatmapLocations,
     type: 'circle',
     source: SOURCE_IDS.heatmapBuildings,
@@ -771,7 +845,7 @@ function addMapLayers(map) {
     }
   });
 
-  map.addLayer({
+  addLayerIfMissing(map, {
     id: LAYER_IDS.heatmapPoints,
     type: 'circle',
     source: SOURCE_IDS.buildings,
@@ -787,7 +861,7 @@ function addMapLayers(map) {
     }
   });
 
-  map.addLayer({
+  addLayerIfMissing(map, {
     id: LAYER_IDS.upgradePriorityPoints,
     type: 'circle',
     source: SOURCE_IDS.upgradeBuildings,
@@ -813,7 +887,7 @@ function addMapLayers(map) {
     }
   });
 
-  map.addLayer({
+  addLayerIfMissing(map, {
     id: LAYER_IDS.energyTilePoints,
     type: 'circle',
     source: SOURCE_IDS.energyTiles,
@@ -847,8 +921,8 @@ function addMapLayers(map) {
     }
   });
 
-  map.addSource(SOURCE_IDS.selected, { type: 'geojson', data: buildFeatureCollection([]) });
-  map.addLayer({
+  addSourceIfMissing(map, SOURCE_IDS.selected, { type: 'geojson', data: buildFeatureCollection([]) });
+  addLayerIfMissing(map, {
     id: LAYER_IDS.selectedHalo,
     type: 'circle',
     source: SOURCE_IDS.selected,
@@ -859,7 +933,7 @@ function addMapLayers(map) {
       'circle-stroke-width': 3
     }
   });
-  map.addLayer({
+  addLayerIfMissing(map, {
     id: LAYER_IDS.selectedPoint,
     type: 'circle',
     source: SOURCE_IDS.selected,
@@ -871,8 +945,8 @@ function addMapLayers(map) {
     }
   });
 
-  map.addSource(SOURCE_IDS.nearby, { type: 'geojson', data: buildFeatureCollection([]) });
-  map.addLayer({
+  addSourceIfMissing(map, SOURCE_IDS.nearby, { type: 'geojson', data: buildFeatureCollection([]) });
+  addLayerIfMissing(map, {
     id: LAYER_IDS.nearby,
     type: 'circle',
     source: SOURCE_IDS.nearby,
@@ -884,8 +958,8 @@ function addMapLayers(map) {
     }
   });
 
-  map.addSource(SOURCE_IDS.nearbyCircle, { type: 'geojson', data: buildFeatureCollection([]) });
-  map.addLayer({
+  addSourceIfMissing(map, SOURCE_IDS.nearbyCircle, { type: 'geojson', data: buildFeatureCollection([]) });
+  addLayerIfMissing(map, {
     id: LAYER_IDS.nearbyCircle,
     type: 'fill',
     source: SOURCE_IDS.nearbyCircle,
@@ -906,6 +980,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
   const allFeaturesRef = useRef(allFeatures);
   const mapClickRef = useRef(onMapClick);
   const hasFittedRef = useRef(false);
+  const theme = useStore((state) => state.theme);
   const viewMode = useStore((state) => state.viewMode);
   const nearbySearchEnabled = useStore((state) => state.nearbySearchEnabled);
   const radiusInMeters = useStore((state) => state.radiusInMeters);
@@ -928,6 +1003,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
   const nearbyCollectionRef = useRef(nearbyCollection);
   const nearbyCircleCollectionRef = useRef(nearbyCircleCollection);
   const selectedFeatureRef = useRef(selectedFeature);
+  const mapStyleUrlRef = useRef(mapStyleUrlForTheme(theme));
   const viewModeRef = useRef(viewMode);
   const nearbySearchEnabledRef = useRef(nearbySearchEnabled);
   const radiusInMetersRef = useRef(radiusInMeters);
@@ -985,7 +1061,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: MAP_STYLE_URL,
+      style: mapStyleUrlRef.current,
       center: DEFAULT_CENTER,
       zoom: DEFAULT_ZOOM,
       attributionControl: false
@@ -1002,45 +1078,15 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
 
     map.on('load', () => {
       addMapLayers(map);
-      map.getSource(SOURCE_IDS.buildings).setData(featureCollectionRef.current);
-      map.getSource(SOURCE_IDS.heatmapBuildings).setData(heatmapCollectionRef.current);
-      map.getSource(SOURCE_IDS.upgradeBuildings).setData(featureCollectionRef.current);
-      map.getSource(SOURCE_IDS.nearby).setData(nearbyCollectionRef.current);
-      map.getSource(SOURCE_IDS.nearbyCircle).setData(nearbyCircleCollectionRef.current);
-      map.setPaintProperty(
-        LAYER_IDS.heatmap,
-        'heatmap-weight',
-        heatmapWeightExpression(heatmapStatsRef.current)
-      );
-      map.setPaintProperty(
-        LAYER_IDS.heatmapPoints,
-        'circle-color',
-        heatmapPointColorExpression(heatmapStatsRef.current)
-      );
-      map.setPaintProperty(
-        LAYER_IDS.heatmapLocations,
-        'circle-color',
-        heatmapPointColorExpression(heatmapStatsRef.current)
-      );
-
-      const markerVisibility = viewModeRef.current === 'markers' ? 'visible' : 'none';
-      const heatmapVisibility = viewModeRef.current === 'heatmap' ? 'visible' : 'none';
-      const tileVisibility = viewModeRef.current === 'tiles' ? 'visible' : 'none';
-      const upgradeVisibility = viewModeRef.current === 'upgrade' ? 'visible' : 'none';
-      map.setLayoutProperty(LAYER_IDS.clusters, 'visibility', markerVisibility);
-      map.setLayoutProperty(LAYER_IDS.clusterCount, 'visibility', markerVisibility);
-      map.setLayoutProperty(LAYER_IDS.points, 'visibility', markerVisibility);
-      map.setLayoutProperty(LAYER_IDS.heatmap, 'visibility', heatmapVisibility);
-      map.setLayoutProperty(LAYER_IDS.heatmapLocations, 'visibility', heatmapVisibility);
-      map.setLayoutProperty(LAYER_IDS.heatmapPoints, 'visibility', heatmapVisibility);
-      map.setLayoutProperty(LAYER_IDS.upgradePriorityPoints, 'visibility', upgradeVisibility);
-      map.setLayoutProperty(LAYER_IDS.energyTilePoints, 'visibility', tileVisibility);
-
-      if (selectedFeatureRef.current) {
-        map.getSource(SOURCE_IDS.selected).setData(
-          buildFeatureCollection([selectedFeatureRef.current])
-        );
-      }
+      syncMapDataAndVisibility(map, {
+        featureCollection: featureCollectionRef.current,
+        heatmapCollection: heatmapCollectionRef.current,
+        heatmapStats: heatmapStatsRef.current,
+        nearbyCollection: nearbyCollectionRef.current,
+        nearbyCircleCollection: nearbyCircleCollectionRef.current,
+        selectedFeature: selectedFeatureRef.current,
+        viewMode: viewModeRef.current
+      });
 
       map.on('click', LAYER_IDS.clusters, (event) => {
         const clusterFeature = map.queryRenderedFeatures(event.point, { layers: [LAYER_IDS.clusters] })[0];
@@ -1159,6 +1205,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
         if (!popupRef.current) return;
         const popupElement = popupRef.current.getElement();
         if (popupElement?.contains(event.target)) return;
+        if (event.target.closest('.sidebar-shell, .collapsed-mode-dock, .top-overlay')) return;
 
         popupRef.current.remove();
         popupRef.current = null;
@@ -1251,29 +1298,55 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
 
   useEffect(() => {
     const map = mapRef.current;
+    if (!map) return;
+
+    const nextStyleUrl = mapStyleUrlForTheme(theme);
+    if (mapStyleUrlRef.current === nextStyleUrl) return;
+
+    mapStyleUrlRef.current = nextStyleUrl;
+    map.once('style.load', () => {
+      const activePopup = popupRef.current;
+      const popupState = activePopup?.isOpen?.() ? activePopup._energimerkingState : null;
+      if (activePopup && !activePopup.isOpen?.()) {
+        popupRef.current = null;
+      }
+      addMapLayers(map);
+      const restoreMapOverlays = () => {
+        addMapLayers(map);
+        syncMapDataAndVisibility(map, {
+          featureCollection: featureCollectionRef.current,
+          heatmapCollection: heatmapCollectionRef.current,
+          heatmapStats: heatmapStatsRef.current,
+          nearbyCollection: nearbyCollectionRef.current,
+          nearbyCircleCollection: nearbyCircleCollectionRef.current,
+          selectedFeature: selectedFeatureRef.current,
+          viewMode: viewModeRef.current
+        });
+      };
+
+      restoreMapOverlays();
+      if (popupState) {
+        popupRef.current?.remove();
+        popupRef.current = openPopup(map, popupState.coordinates, popupState.html);
+      }
+      map.once('idle', restoreMapOverlays);
+    });
+    map.setStyle(nextStyleUrl, { diff: false });
+  }, [theme]);
+
+  useEffect(() => {
+    const map = mapRef.current;
     if (!map?.isStyleLoaded()) return;
-    const source = map.getSource(SOURCE_IDS.buildings);
-    const heatmapSource = map.getSource(SOURCE_IDS.heatmapBuildings);
-    const upgradeSource = map.getSource(SOURCE_IDS.upgradeBuildings);
-    if (source) source.setData(featureCollection);
-    if (heatmapSource) heatmapSource.setData(heatmapData.collection);
-    if (upgradeSource) upgradeSource.setData(featureCollection);
-    map.setPaintProperty(LAYER_IDS.heatmap, 'heatmap-weight', heatmapWeightExpression(heatmapData.stats));
-    map.setPaintProperty(LAYER_IDS.heatmapPoints, 'circle-color', heatmapPointColorExpression(heatmapData.stats));
-    map.setPaintProperty(LAYER_IDS.heatmapLocations, 'circle-color', heatmapPointColorExpression(heatmapData.stats));
-    const markerVisibility = viewMode === 'markers' ? 'visible' : 'none';
-    const heatmapVisibility = viewMode === 'heatmap' ? 'visible' : 'none';
-    const tileVisibility = viewMode === 'tiles' ? 'visible' : 'none';
-    const upgradeVisibility = viewMode === 'upgrade' ? 'visible' : 'none';
-    map.setLayoutProperty(LAYER_IDS.clusters, 'visibility', markerVisibility);
-    map.setLayoutProperty(LAYER_IDS.clusterCount, 'visibility', markerVisibility);
-    map.setLayoutProperty(LAYER_IDS.points, 'visibility', markerVisibility);
-    map.setLayoutProperty(LAYER_IDS.heatmap, 'visibility', heatmapVisibility);
-    map.setLayoutProperty(LAYER_IDS.heatmapLocations, 'visibility', heatmapVisibility);
-    map.setLayoutProperty(LAYER_IDS.heatmapPoints, 'visibility', heatmapVisibility);
-    map.setLayoutProperty(LAYER_IDS.upgradePriorityPoints, 'visibility', upgradeVisibility);
-    map.setLayoutProperty(LAYER_IDS.energyTilePoints, 'visibility', tileVisibility);
-  }, [featureCollection, heatmapData, viewMode]);
+    syncMapDataAndVisibility(map, {
+      featureCollection,
+      heatmapCollection: heatmapData.collection,
+      heatmapStats: heatmapData.stats,
+      nearbyCollection,
+      nearbyCircleCollection,
+      selectedFeature,
+      viewMode
+    });
+  }, [featureCollection, heatmapData, nearbyCollection, nearbyCircleCollection, selectedFeature, viewMode]);
 
   useEffect(() => {
     const map = mapRef.current;
