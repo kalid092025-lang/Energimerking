@@ -132,9 +132,15 @@ function App() {
   const handleMapClick = async ({ latitude, longitude, radiusInMeters }) => {
     setIsSearchingNearby(true);
     setError('');
+    const center = { latitude, longitude };
+
+    setNearby({
+      center,
+      radiusInMeters,
+      results: []
+    });
 
     try {
-      const center = { latitude, longitude };
       const payload = await fetchNearbyBuildingsGeoJson({
         latitude,
         longitude,

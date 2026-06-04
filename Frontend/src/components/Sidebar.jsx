@@ -1,3 +1,4 @@
+import { CircleDot, Moon, SlidersHorizontal, Sun } from 'lucide-react';
 import { useStore } from '../store/useStore.js';
 import Filters from './Filters.jsx';
 import '../styles/sidebar.css';
@@ -11,7 +12,7 @@ function Sidebar({ featureCount, totalCount, isSearchingNearby }) {
   const toggleTheme = useStore((state) => state.toggleTheme);
   const toggleNearbySearch = useStore((state) => state.toggleNearbySearch);
   const clearNearby = useStore((state) => state.clearNearby);
-  const themeIcon = theme === 'dark' ? '/icons/moon.png' : '/icons/sun.png';
+  const ThemeIcon = theme === 'dark' ? Moon : Sun;
 
   return (
     <aside className={`sidebar-shell ${sidebarOpen ? 'is-open' : 'is-closed'}`}>
@@ -24,7 +25,7 @@ function Sidebar({ featureCount, totalCount, isSearchingNearby }) {
               onClick={toggleSidebar}
               aria-pressed={sidebarOpen}
             >
-              <img src="/icons/filter.png" alt="" aria-hidden="true" />
+              <SlidersHorizontal className="tool-icon" aria-hidden="true" strokeWidth={2.2} />
               <span className="sr-only">Filters</span>
             </button>
             <button
@@ -35,11 +36,11 @@ function Sidebar({ featureCount, totalCount, isSearchingNearby }) {
               aria-label="Toggle radius search. When enabled, click the map to search for buildings inside the selected radius."
               title="Toggle radius search. When enabled, click the map to search for buildings inside the selected radius."
             >
-              <span>Radius <span className="tool-help" aria-hidden="true">?</span></span>
+              <span><CircleDot className="tool-inline-icon" aria-hidden="true" strokeWidth={2.2} /> Radius <span className="tool-help" aria-hidden="true">?</span></span>
               <strong>{nearbySearchEnabled ? 'On' : 'Off'}</strong>
             </button>
             <button type="button" className="tool-button icon-tool" onClick={toggleTheme}>
-              <img src={themeIcon} alt="" aria-hidden="true" />
+              <ThemeIcon className="tool-icon" aria-hidden="true" strokeWidth={2.2} />
               <span className="sr-only">{theme === 'dark' ? 'Dark mode' : 'Light mode'}</span>
             </button>
           </div>

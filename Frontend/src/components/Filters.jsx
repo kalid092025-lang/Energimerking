@@ -1,16 +1,33 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store/useStore.js';
 
 function RangeField({ label, min, max, value, onChange, suffix = '', step = 1, tooltip = '' }) {
-  const [currentMin, currentMax] = value;
+  const [draftValue, setDraftValue] = useState(value);
+  const draftValueRef = useRef(value);
+  const [currentMin, currentMax] = draftValue;
   const span = max - min || 1;
   const minPercent = ((currentMin - min) / span) * 100;
   const maxPercent = ((currentMax - min) / span) * 100;
+
+  useEffect(() => {
+    setDraftValue(value);
+    draftValueRef.current = value;
+  }, [value]);
+
+  const updateDraftValue = (nextValue) => {
+    draftValueRef.current = nextValue;
+    setDraftValue(nextValue);
+  };
+
+  const commitDraftValue = () => {
+    onChange(draftValueRef.current);
+  };
+
   const updateMin = (nextValue) => {
-    onChange([Math.min(Number(nextValue), currentMax), currentMax]);
+    updateDraftValue([Math.min(Number(nextValue), currentMax), currentMax]);
   };
   const updateMax = (nextValue) => {
-    onChange([currentMin, Math.max(Number(nextValue), currentMin)]);
+    updateDraftValue([currentMin, Math.max(Number(nextValue), currentMin)]);
   };
 
   return (
@@ -48,6 +65,10 @@ function RangeField({ label, min, max, value, onChange, suffix = '', step = 1, t
           step={step}
           value={currentMin}
           onChange={(event) => updateMin(event.target.value)}
+          onPointerUp={commitDraftValue}
+          onPointerCancel={commitDraftValue}
+          onBlur={commitDraftValue}
+          onKeyUp={commitDraftValue}
         />
         <input
           className="range-input range-input-max"
@@ -58,6 +79,10 @@ function RangeField({ label, min, max, value, onChange, suffix = '', step = 1, t
           step={step}
           value={currentMax}
           onChange={(event) => updateMax(event.target.value)}
+          onPointerUp={commitDraftValue}
+          onPointerCancel={commitDraftValue}
+          onBlur={commitDraftValue}
+          onKeyUp={commitDraftValue}
         />
       </div>
     </div>

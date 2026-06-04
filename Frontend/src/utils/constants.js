@@ -17,6 +17,7 @@ export const LAYER_IDS = {
   clusterCount: 'cluster-count',
   points: 'unclustered-points',
   heatmap: 'buildings-heatmap',
+  heatmapLocations: 'buildings-heatmap-locations',
   heatmapPoints: 'buildings-heatmap-points',
   upgradePriorityPoints: 'upgrade-priority-points',
   energyTilePoints: 'energy-tile-points',

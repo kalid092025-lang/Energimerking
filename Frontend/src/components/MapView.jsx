@@ -384,13 +384,13 @@ function heatmapWeightExpression(stats) {
     ['linear'],
     ['coalesce', ['get', 'heatmapEnergy'], 0],
     0,
-    0,
+    0.14,
     stats.p50,
-    0.12,
+    0.42,
     stats.p80,
-    0.22,
+    0.72,
     stats.p95,
-    0.34
+    1
   ];
 }
 
@@ -607,10 +607,9 @@ function MapLegend({ heatmapStats }) {
           </>
         ) : (
           <div className="legend-list">
-            <div className="legend-item"><span className="legend-dot dot-cluster-small" />Small cluster</div>
+            <div className="legend-item"><span className="legend-dot dot-cluster-small" />Small cluster / individual</div>
             <div className="legend-item"><span className="legend-dot dot-cluster-medium" />Medium cluster</div>
             <div className="legend-item"><span className="legend-dot dot-cluster-large" />Large cluster</div>
-            <div className="legend-item"><span className="legend-dot dot-building" />Individual building</div>
             <div className="legend-item"><span className="legend-dot dot-nearby" />radios result</div>
           </div>
         )
@@ -732,29 +731,43 @@ function addMapLayers(map) {
     maxzoom: 22,
     layout: { visibility: 'none' },
     paint: {
-      'heatmap-weight': ['interpolate', ['linear'], ['coalesce', ['get', 'heatmapEnergy'], 0], 0, 0, 60, 0.12, 180, 0.22, 420, 0.34],
-      'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 4, 0.26, 8, 0.38, 12, 0.52, 16, 0.62],
+      'heatmap-weight': ['interpolate', ['linear'], ['coalesce', ['get', 'heatmapEnergy'], 0], 0, 0.14, 60, 0.42, 180, 0.72, 420, 1],
+      'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 4, 0.48, 8, 0.68, 12, 0.82, 16, 0.9],
       'heatmap-color': [
         'interpolate',
         ['linear'],
         ['heatmap-density'],
         0,
         'rgba(56, 189, 248, 0)',
-        0.22,
-        'rgba(125, 211, 252, 0.42)',
-        0.46,
-        'rgba(45, 212, 191, 0.5)',
-        0.68,
-        'rgba(163, 230, 53, 0.56)',
-        0.84,
-        'rgba(253, 224, 71, 0.64)',
-        0.96,
-        'rgba(253, 186, 116, 0.7)',
+        0.08,
+        'rgba(125, 211, 252, 0.54)',
+        0.28,
+        'rgba(45, 212, 191, 0.62)',
+        0.52,
+        'rgba(163, 230, 53, 0.68)',
+        0.74,
+        'rgba(253, 224, 71, 0.76)',
+        0.9,
+        'rgba(253, 186, 116, 0.84)',
         1,
-        'rgba(239, 68, 68, 0.78)'
+        'rgba(239, 68, 68, 0.92)'
       ],
-      'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 4, 10, 8, 14, 12, 20, 18, 30],
-      'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.52, 9, 0.66, 16, 0.72, 20, 0.5]
+      'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 4, 16, 8, 22, 12, 30, 18, 42],
+      'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.72, 9, 0.82, 16, 0.76, 20, 0.48]
+    }
+  });
+
+  map.addLayer({
+    id: LAYER_IDS.heatmapLocations,
+    type: 'circle',
+    source: SOURCE_IDS.heatmapBuildings,
+    layout: { visibility: 'none' },
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 5, 8, 7, 12, 10, 16, 14],
+      'circle-color': '#2dd4bf',
+      'circle-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.42, 10, 0.5, 16, 0.34],
+      'circle-blur': ['interpolate', ['linear'], ['zoom'], 4, 1.1, 12, 0.85, 16, 0.55],
+      'circle-stroke-width': 0
     }
   });
 
@@ -763,14 +776,14 @@ function addMapLayers(map) {
     type: 'circle',
     source: SOURCE_IDS.buildings,
     filter: ['!', ['has', 'point_count']],
-    minzoom: 13,
+    minzoom: 11,
     layout: { visibility: 'none' },
     paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 2.4, 8, 3.2, 12, 5.4, 15, 7.2],
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 3.2, 11, 5.2, 14, 7.2, 17, 9.5],
       'circle-color': '#2dd4bf',
-      'circle-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.68, 8, 0.74, 12, 0.82, 15, 0.9],
+      'circle-opacity': ['interpolate', ['linear'], ['zoom'], 10, 0.68, 12, 0.82, 15, 0.94],
       'circle-stroke-color': 'rgba(255, 255, 255, 0.86)',
-      'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 4, 0.2, 12, 1.1]
+      'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 10, 0.4, 14, 1.3]
     }
   });
 
@@ -1004,6 +1017,11 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
         'circle-color',
         heatmapPointColorExpression(heatmapStatsRef.current)
       );
+      map.setPaintProperty(
+        LAYER_IDS.heatmapLocations,
+        'circle-color',
+        heatmapPointColorExpression(heatmapStatsRef.current)
+      );
 
       const markerVisibility = viewModeRef.current === 'markers' ? 'visible' : 'none';
       const heatmapVisibility = viewModeRef.current === 'heatmap' ? 'visible' : 'none';
@@ -1013,6 +1031,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
       map.setLayoutProperty(LAYER_IDS.clusterCount, 'visibility', markerVisibility);
       map.setLayoutProperty(LAYER_IDS.points, 'visibility', markerVisibility);
       map.setLayoutProperty(LAYER_IDS.heatmap, 'visibility', heatmapVisibility);
+      map.setLayoutProperty(LAYER_IDS.heatmapLocations, 'visibility', heatmapVisibility);
       map.setLayoutProperty(LAYER_IDS.heatmapPoints, 'visibility', heatmapVisibility);
       map.setLayoutProperty(LAYER_IDS.upgradePriorityPoints, 'visibility', upgradeVisibility);
       map.setLayoutProperty(LAYER_IDS.energyTilePoints, 'visibility', tileVisibility);
@@ -1241,6 +1260,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
     if (upgradeSource) upgradeSource.setData(featureCollection);
     map.setPaintProperty(LAYER_IDS.heatmap, 'heatmap-weight', heatmapWeightExpression(heatmapData.stats));
     map.setPaintProperty(LAYER_IDS.heatmapPoints, 'circle-color', heatmapPointColorExpression(heatmapData.stats));
+    map.setPaintProperty(LAYER_IDS.heatmapLocations, 'circle-color', heatmapPointColorExpression(heatmapData.stats));
     const markerVisibility = viewMode === 'markers' ? 'visible' : 'none';
     const heatmapVisibility = viewMode === 'heatmap' ? 'visible' : 'none';
     const tileVisibility = viewMode === 'tiles' ? 'visible' : 'none';
@@ -1249,6 +1269,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
     map.setLayoutProperty(LAYER_IDS.clusterCount, 'visibility', markerVisibility);
     map.setLayoutProperty(LAYER_IDS.points, 'visibility', markerVisibility);
     map.setLayoutProperty(LAYER_IDS.heatmap, 'visibility', heatmapVisibility);
+    map.setLayoutProperty(LAYER_IDS.heatmapLocations, 'visibility', heatmapVisibility);
     map.setLayoutProperty(LAYER_IDS.heatmapPoints, 'visibility', heatmapVisibility);
     map.setLayoutProperty(LAYER_IDS.upgradePriorityPoints, 'visibility', upgradeVisibility);
     map.setLayoutProperty(LAYER_IDS.energyTilePoints, 'visibility', tileVisibility);
