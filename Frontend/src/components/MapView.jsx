@@ -626,7 +626,7 @@ function MapLegend({ heatmapStats }) {
 }
 
 const MODE_DOCK_ITEMS = [
-  { value: 'markers', label: 'Markers', Icon: MapPin },
+  { value: 'markers', label: 'Bydeler i Oslo', Icon: MapPin },
   { value: 'heatmap', label: 'Heatmap', Icon: Flame },
   { value: 'tiles', label: 'Tiles', Icon: Layers },
   { value: 'upgrade', label: 'Upgrade priority', Icon: TrendingUp }
@@ -971,7 +971,7 @@ function addMapLayers(map) {
   });
 }
 
-function MapView({ features, allFeaturesCount, selectedFeature, searchSelection, nearbyState, onMapClick, isSearchingNearby }) {
+function MapView({ features, allFeaturesCount, selectedFeature, searchSelection, nearbyState, selectedBydel, onMapClick, isSearchingNearby }) {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const popupRef = useRef(null);
@@ -1007,6 +1007,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
   const viewModeRef = useRef(viewMode);
   const nearbySearchEnabledRef = useRef(nearbySearchEnabled);
   const radiusInMetersRef = useRef(radiusInMeters);
+  const selectedBydelRef = useRef(selectedBydel);
 
   useEffect(() => {
     featuresRef.current = features;
@@ -1055,6 +1056,10 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
   useEffect(() => {
     radiusInMetersRef.current = radiusInMeters;
   }, [radiusInMeters]);
+
+  useEffect(() => {
+    selectedBydelRef.current = selectedBydel;
+  }, [selectedBydel]);
 
   useEffect(() => {
     if (mapRef.current || !mapContainerRef.current) return undefined;
@@ -1400,6 +1405,18 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
   useEffect(() => {
     const map = mapRef.current;
     if (!map || hasFittedRef.current || allFeaturesCount === 0 || features.length === 0) return;
+    const activeBydel = selectedBydelRef.current;
+    if (activeBydel) {
+      map.easeTo({
+        center: [activeBydel.longitude, activeBydel.latitude],
+        zoom: activeBydel.zoom || 11,
+        duration: 1200,
+        essential: true
+      });
+      hasFittedRef.current = true;
+      return;
+    }
+
     const coordinates = features.map((feature) => feature.geometry.coordinates);
     const bounds = coordinates.reduce(
       (accumulator, coordinate) => accumulator.extend(coordinate),
@@ -1412,6 +1429,17 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
     });
     hasFittedRef.current = true;
   }, [allFeaturesCount, features]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map?.isStyleLoaded() || !selectedBydel) return;
+    map.easeTo({
+      center: [selectedBydel.longitude, selectedBydel.latitude],
+      zoom: selectedBydel.zoom || 11,
+      duration: 900,
+      essential: true
+    });
+  }, [selectedBydel]);
 
   return (
     <div className="map-shell">

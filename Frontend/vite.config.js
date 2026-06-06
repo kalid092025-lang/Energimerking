@@ -11,6 +11,11 @@ const hmrClientPort = process.env.VITE_HMR_CLIENT_PORT
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      'lucide-react': 'lucide-react/dist/cjs/lucide-react.js'
+    }
+  },
   server: {
     host: devHost,
     port: devPort,

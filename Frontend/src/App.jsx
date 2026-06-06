@@ -10,6 +10,7 @@ import {
   getSearchSuggestions,
   normalizeGeoJson
 } from './utils/filtering.js';
+import { findBydel } from './utils/osloBydeler.js';
 import './styles/app.css';
 
 function toRadians(degrees) {
@@ -56,6 +57,7 @@ function App() {
   const theme = useStore((state) => state.theme);
   const searchQuery = useStore((state) => state.searchQuery);
   const selectedFeature = useStore((state) => state.selectedFeature);
+  const selectedBydelId = useStore((state) => state.selectedBydelId);
   const nearby = useStore((state) => state.nearby);
   const filters = useStore((state) => state.filters);
   const allFeatures = useStore((state) => state.allFeatures);
@@ -77,16 +79,30 @@ function App() {
 
   useEffect(() => {
     let active = true;
+    const bydel = findBydel(selectedBydelId);
 
     async function loadData() {
       try {
         setLoading(true);
         setError('');
-        const payload = await fetchBuildingsGeoJson();
+        const payload = await fetchBuildingsGeoJson({
+          latitude: bydel.latitude,
+          longitude: bydel.longitude,
+          radiusInMeters: bydel.radiusInMeters,
+          amount: 20000
+        });
         if (!active) return;
         const normalized = normalizeGeoJson(payload);
         setAllFeatures(normalized.features);
         initializeFilters(buildInitialFilterBounds(normalized.features));
+        setNearby({
+          center: {
+            latitude: bydel.latitude,
+            longitude: bydel.longitude
+          },
+          radiusInMeters: bydel.radiusInMeters,
+          results: []
+        });
       } catch (loadError) {
         if (!active) return;
         setAllFeatures([]);
@@ -101,12 +117,13 @@ function App() {
     return () => {
       active = false;
     };
-  }, [initializeFilters, setAllFeatures, setError, setLoading]);
+  }, [initializeFilters, selectedBydelId, setAllFeatures, setError, setLoading, setNearby]);
 
   const filteredFeatures = useMemo(
     () => filterFeatures(allFeatures, filters),
     [allFeatures, filters]
   );
+  const selectedBydel = useMemo(() => findBydel(selectedBydelId), [selectedBydelId]);
   const suggestions = useMemo(
     () => getSearchSuggestions(allFeatures, searchQuery),
     [allFeatures, searchQuery]
@@ -213,6 +230,7 @@ function App() {
             selectedFeature={selectedFeatureFromList}
             searchSelection={searchSelection}
             nearbyState={nearby}
+            selectedBydel={selectedBydel}
             onMapClick={handleMapClick}
             isSearchingNearby={isSearchingNearby}
           />

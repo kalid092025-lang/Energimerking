@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store/useStore.js';
+import { OSLO_BYDELER, findBydel } from '../utils/osloBydeler.js';
 
 function RangeField({ label, min, max, value, onChange, suffix = '', step = 1, tooltip = '' }) {
   const [draftValue, setDraftValue] = useState(value);
@@ -149,13 +150,129 @@ function compareHeatingGrades(left, right) {
     : leftOrder - rightOrder;
 }
 
+function formatRadius(radiusInMeters) {
+  return radiusInMeters >= 1000
+    ? `${(radiusInMeters / 1000).toFixed(radiusInMeters % 1000 === 0 ? 0 : 1)} km`
+    : `${radiusInMeters} m`;
+}
+
+function percentage(count, total) {
+  return total > 0 ? Math.round((count / total) * 100) : 0;
+}
+
+function countBy(values, allowedValues) {
+  const counts = Object.fromEntries(allowedValues.map((value) => [value, 0]));
+
+  values.forEach((value) => {
+    if (value in counts) {
+      counts[value] += 1;
+    }
+  });
+
+  return counts;
+}
+
+function mostCommon(values, fallback = 'N/A') {
+  const counts = new Map();
+
+  values.filter(Boolean).forEach((value) => {
+    counts.set(value, (counts.get(value) || 0) + 1);
+  });
+
+  return Array.from(counts.entries())
+    .sort((left, right) => right[1] - left[1] || String(left[0]).localeCompare(String(right[0])))[0]?.[0] || fallback;
+}
+
+function median(values) {
+  if (values.length === 0) return null;
+
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+
+  return sorted.length % 2 === 0
+    ? Math.round((sorted[middle - 1] + sorted[middle]) / 2)
+    : Math.round(sorted[middle]);
+}
+
+function buildBydelStats(features) {
+  const total = features.length;
+  const energyValues = [];
+  const buildYears = [];
+  const energyGrades = [];
+  const heatingGrades = [];
+  let oldBuildingCount = 0;
+  let highUpgradeCount = 0;
+
+  features.forEach((feature) => {
+    const props = feature.properties || {};
+    const energyGrade = String(props.energikarakter || '').trim().toUpperCase();
+    const heatingGrade = normalizeHeatingGrade(props.oppvarmingskarakter);
+    const energy = Number(props.energibruk_kwh_m2);
+    const buildYear = Number(props.byggeaar);
+    const upgradeScore = Number(props.upgradeScore);
+
+    if (energyGrade) {
+      energyGrades.push(energyGrade);
+    }
+
+    if (heatingGrade) {
+      heatingGrades.push(heatingGrade);
+    }
+
+    if (Number.isFinite(energy) && energy > 0) {
+      energyValues.push(energy);
+    }
+
+    if (Number.isFinite(buildYear) && buildYear > 0) {
+      buildYears.push(buildYear);
+      if (buildYear < 1980) oldBuildingCount += 1;
+    }
+
+    if (Number.isFinite(upgradeScore) && upgradeScore >= 75) {
+      highUpgradeCount += 1;
+    }
+  });
+
+  const averageEnergy = energyValues.length
+    ? Math.round(energyValues.reduce((sum, value) => sum + value, 0) / energyValues.length)
+    : null;
+  const averageBuildYear = buildYears.length
+    ? Math.round(buildYears.reduce((sum, value) => sum + value, 0) / buildYears.length)
+    : null;
+  const energyGradeCounts = countBy(energyGrades, ['A', 'B', 'C', 'D', 'E', 'F', 'G']);
+  const heatingGradeCounts = countBy(heatingGrades, ['GREEN', 'YELLOW', 'ORANGE', 'RED']);
+
+  return {
+    total,
+    averageEnergy,
+    medianEnergy: median(energyValues),
+    mostCommonEnergyGrade: mostCommon(energyGrades),
+    mostCommonHeatingGrade: mostCommon(heatingGrades),
+    energyGradeCounts,
+    heatingGradeCounts,
+    averageBuildYear,
+    oldBuildingShare: percentage(oldBuildingCount, total),
+    highUpgradeShare: percentage(highUpgradeCount, total)
+  };
+}
+
+function formatEnergy(value) {
+  return value ? `${value} kWh/m2` : 'N/A';
+}
+
+function formatCountShare(count, total) {
+  return `${percentage(count, total)}% (${count.toLocaleString()})`;
+}
+
 function Filters() {
   const viewMode = useStore((state) => state.viewMode);
   const allFeatures = useStore((state) => state.allFeatures);
+  const selectedBydelId = useStore((state) => state.selectedBydelId);
   const filters = useStore((state) => state.filters);
   const filterBounds = useStore((state) => state.filterBounds);
   const radiusInMeters = useStore((state) => state.radiusInMeters);
   const setViewMode = useStore((state) => state.setViewMode);
+  const setSelectedBydelId = useStore((state) => state.setSelectedBydelId);
   const updateRange = useStore((state) => state.updateRange);
   const updateSelect = useStore((state) => state.updateSelect);
   const setRadiusInMeters = useStore((state) => state.setRadiusInMeters);
@@ -163,6 +280,8 @@ function Filters() {
   const radiusLabel = radiusInMeters >= 1000
     ? `${(radiusInMeters / 1000).toFixed(radiusInMeters % 1000 === 0 ? 0 : 1)} km`
     : `${radiusInMeters} m`;
+  const selectedBydel = findBydel(selectedBydelId);
+  const bydelStats = useMemo(() => buildBydelStats(allFeatures), [allFeatures]);
 
   const energyGrades = useMemo(() => {
     const values = new Set();
@@ -215,12 +334,97 @@ function Filters() {
             value={viewMode}
             onChange={(event) => setViewMode(event.target.value)}
           >
-            <option value="markers">Markers</option>
+            <option value="markers">Bydeler i Oslo</option>
             <option value="heatmap">Heatmap</option>
             <option value="tiles">Tiles</option>
             <option value="upgrade">Upgrade priority</option>
           </select>
         </div>
+        {viewMode === 'markers' && (
+          <div className="bydel-panel">
+            <div className="section-heading">
+              <div>
+                <div className="section-kicker">Bydeler i Oslo</div>
+              </div>
+            </div>
+            <div className="bydel-select-wrap">
+              <select
+                className="bydel-select"
+                aria-label="Velg bydel i Oslo"
+                value={selectedBydelId}
+                onChange={(event) => setSelectedBydelId(event.target.value)}
+              >
+                {OSLO_BYDELER.map((bydel) => (
+                  <option key={bydel.id} value={bydel.id}>
+                    {bydel.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="bydel-meta">
+              <span>{selectedBydel.name}</span>
+              <strong>{formatRadius(selectedBydel.radiusInMeters)} radius</strong>
+            </div>
+            <div className="bydel-stats-grid">
+              <div className="bydel-stat">
+                <span>Buildings loaded</span>
+                <strong>{bydelStats.total.toLocaleString()}</strong>
+              </div>
+              <div className="bydel-stat">
+                <span>Average energy use</span>
+                <strong>{formatEnergy(bydelStats.averageEnergy)}</strong>
+              </div>
+              <div className="bydel-stat">
+                <span>Typical energy use</span>
+                <strong>{formatEnergy(bydelStats.medianEnergy)}</strong>
+              </div>
+              <div className="bydel-stat">
+                <span>Most common energy grade</span>
+                <strong>{bydelStats.mostCommonEnergyGrade}</strong>
+              </div>
+              <div className="bydel-stat">
+                <span>Most common heating grade</span>
+                <strong>{bydelStats.mostCommonHeatingGrade}</strong>
+              </div>
+              <div className="bydel-stat">
+                <span>Average build year</span>
+                <strong>{bydelStats.averageBuildYear || 'N/A'}</strong>
+              </div>
+              <div className="bydel-stat">
+                <span>Built before 1980</span>
+                <strong>{bydelStats.oldBuildingShare}%</strong>
+              </div>
+              <div className="bydel-stat">
+                <span>High upgrade priority</span>
+                <strong>{bydelStats.highUpgradeShare}%</strong>
+              </div>
+              <div className="bydel-stat-section">Energy grades</div>
+              {['A', 'B', 'C', 'D', 'E', 'F', 'G'].map((grade) => (
+                <div key={grade} className="bydel-stat">
+                  <span>Grade {grade}</span>
+                  <strong>{formatCountShare(bydelStats.energyGradeCounts[grade], bydelStats.total)}</strong>
+                </div>
+              ))}
+              <div className="bydel-stat-section">Heating grades</div>
+              <div className="bydel-stat">
+                <span>Green heating</span>
+                <strong>{formatCountShare(bydelStats.heatingGradeCounts.GREEN, bydelStats.total)}</strong>
+              </div>
+              <div className="bydel-stat">
+                <span>Yellow heating</span>
+                <strong>{formatCountShare(bydelStats.heatingGradeCounts.YELLOW, bydelStats.total)}</strong>
+              </div>
+              <div className="bydel-stat">
+                <span>Orange heating</span>
+                <strong>{formatCountShare(bydelStats.heatingGradeCounts.ORANGE, bydelStats.total)}</strong>
+              </div>
+              <div className="bydel-stat">
+                <span>Red heating</span>
+                <strong>{formatCountShare(bydelStats.heatingGradeCounts.RED, bydelStats.total)}</strong>
+              </div>
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="filter-card">
