@@ -68,3 +68,7 @@ export async function fetchNearbyBuildingsGeoJson({
     onlyNew
   });
 }
+
+export async function fetchBydelStats(bydelId) {
+  return getJson(`/bydel-stats/${encodeURIComponent(bydelId)}`);
+}

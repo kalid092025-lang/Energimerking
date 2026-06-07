@@ -24,6 +24,7 @@ builder.Services.AddDbContext<EnergimerkingContext>(options =>
 );
 
 builder.Services.AddScoped<EnergimerkingService>();
+builder.Services.AddHttpClient();
 
 var app = builder.Build();
 

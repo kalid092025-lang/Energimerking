@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { fetchBydelStats } from '../services/api.js';
 import { useStore } from '../store/useStore.js';
 import { OSLO_BYDELER, findBydel } from '../utils/osloBydeler.js';
 
@@ -260,6 +261,18 @@ function formatEnergy(value) {
   return value ? `${value} kWh/m2` : 'N/A';
 }
 
+function formatNumber(value) {
+  return Number.isFinite(Number(value)) ? Math.round(Number(value)).toLocaleString() : 'N/A';
+}
+
+function formatCurrency(value) {
+  return Number.isFinite(Number(value)) ? `${Math.round(Number(value)).toLocaleString()} kr` : 'N/A';
+}
+
+function formatPercent(value) {
+  return Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)}%` : 'N/A';
+}
+
 function formatCountShare(count, total) {
   return `${percentage(count, total)}% (${count.toLocaleString()})`;
 }
@@ -282,6 +295,40 @@ function Filters() {
     : `${radiusInMeters} m`;
   const selectedBydel = findBydel(selectedBydelId);
   const bydelStats = useMemo(() => buildBydelStats(allFeatures), [allFeatures]);
+  const [externalBydelStats, setExternalBydelStats] = useState(null);
+  const [externalBydelStatus, setExternalBydelStatus] = useState('idle');
+  const bydelStatsCache = useRef(new Map());
+
+  useEffect(() => {
+    let isActive = true;
+
+    if (bydelStatsCache.current.has(selectedBydelId)) {
+      setExternalBydelStats(bydelStatsCache.current.get(selectedBydelId));
+      setExternalBydelStatus('ready');
+      return () => {
+        isActive = false;
+      };
+    }
+
+    setExternalBydelStatus('loading');
+    setExternalBydelStats(null);
+
+    fetchBydelStats(selectedBydelId)
+      .then((payload) => {
+        if (!isActive) return;
+        bydelStatsCache.current.set(selectedBydelId, payload);
+        setExternalBydelStats(payload);
+        setExternalBydelStatus('ready');
+      })
+      .catch(() => {
+        if (!isActive) return;
+        setExternalBydelStatus('error');
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [selectedBydelId]);
 
   const energyGrades = useMemo(() => {
     const values = new Set();
@@ -398,6 +445,48 @@ function Filters() {
                 <span>High upgrade priority</span>
                 <strong>{bydelStats.highUpgradeShare}%</strong>
               </div>
+              <div className="bydel-stat-section">
+                Oslo statistics {externalBydelStatus === 'loading' ? 'loading' : ''}
+              </div>
+              <div className="bydel-stat">
+                <span>Median house price</span>
+                <strong>{formatCurrency(externalBydelStats?.housing?.medianHousePrice)}</strong>
+              </div>
+              <div className="bydel-stat">
+                <span>Price per m2</span>
+                <strong>{formatCurrency(externalBydelStats?.housing?.pricePerM2)}</strong>
+              </div>
+              <div className="bydel-stat">
+                <span>Price trend</span>
+                <strong>{formatPercent(externalBydelStats?.housing?.priceTrendPercent)}</strong>
+              </div>
+              <div className="bydel-stat">
+                <span>Median household income</span>
+                <strong>{formatCurrency(externalBydelStats?.demographics?.medianHouseholdIncome)}</strong>
+              </div>
+              <div className="bydel-stat">
+                <span>Population</span>
+                <strong>{formatNumber(externalBydelStats?.demographics?.population)}</strong>
+              </div>
+              <div className="bydel-stat">
+                <span>Population growth</span>
+                <strong>{formatPercent(externalBydelStats?.demographics?.populationGrowthPercent)}</strong>
+              </div>
+              <div className="bydel-stat-section">NOBIL chargers</div>
+              <div className="bydel-stat">
+                <span>Public chargers</span>
+                <strong>{formatNumber(externalBydelStats?.chargers?.publicChargers)}</strong>
+              </div>
+              <div className="bydel-stat">
+                <span>Fast chargers</span>
+                <strong>{formatNumber(externalBydelStats?.chargers?.fastChargers)}</strong>
+              </div>
+              {externalBydelStatus === 'error' && (
+                <div className="bydel-stat-note">External bydel stats are unavailable.</div>
+              )}
+              {externalBydelStats?.chargers?.status && (
+                <div className="bydel-stat-note">{externalBydelStats.chargers.status}</div>
+              )}
               <div className="bydel-stat-section">Energy grades</div>
               {['A', 'B', 'C', 'D', 'E', 'F', 'G'].map((grade) => (
                 <div key={grade} className="bydel-stat">
