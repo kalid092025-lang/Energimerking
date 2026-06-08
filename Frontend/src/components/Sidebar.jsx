@@ -1,7 +1,14 @@
-import { CircleDot, Download, Eye, Moon, SlidersHorizontal, Sun } from 'lucide-react';
-import { useStore } from '../store/useStore.js';
-import Filters from './Filters.jsx';
-import '../styles/sidebar.css';
+import {
+  CircleDot,
+  Download,
+  Eye,
+  Moon,
+  SlidersHorizontal,
+  Sun,
+} from "lucide-react";
+import { useStore } from "../store/useStore.js";
+import Filters from "./Filters.jsx";
+import "../styles/sidebar.css";
 
 function Sidebar({ featureCount, totalCount, isSearchingNearby }) {
   const sidebarOpen = useStore((state) => state.sidebarOpen);
@@ -12,54 +19,90 @@ function Sidebar({ featureCount, totalCount, isSearchingNearby }) {
   const toggleTheme = useStore((state) => state.toggleTheme);
   const toggleNearbySearch = useStore((state) => state.toggleNearbySearch);
   const clearNearby = useStore((state) => state.clearNearby);
-  const ThemeIcon = theme === 'dark' ? Moon : Sun;
+  const ThemeIcon = theme === "dark" ? Moon : Sun;
 
   return (
-    <aside className={`sidebar-shell ${sidebarOpen ? 'is-open' : 'is-closed'}`}>
+    <aside className={`sidebar-shell ${sidebarOpen ? "is-open" : "is-closed"}`}>
       <div className="sidebar-panel">
         <div className="sidebar-top">
           <div className="sidebar-controls" aria-label="Map tools">
             <button
               type="button"
-              className={`tool-button icon-tool ${sidebarOpen ? 'active' : ''}`}
+              className={`tool-button icon-tool ${sidebarOpen ? "active" : ""}`}
               onClick={toggleSidebar}
               aria-pressed={sidebarOpen}
             >
-              <SlidersHorizontal className="tool-icon" aria-hidden="true" strokeWidth={2.2} />
+              <SlidersHorizontal
+                className="tool-icon"
+                aria-hidden="true"
+                strokeWidth={2.2}
+              />
               <span className="sr-only">Filters</span>
             </button>
             <button
               type="button"
-              className={`tool-button ${nearbySearchEnabled ? 'active' : ''}`}
+              className={`tool-button ${nearbySearchEnabled ? "active" : ""}`}
               onClick={toggleNearbySearch}
               aria-pressed={nearbySearchEnabled}
               aria-label="Toggle radius search. When enabled, click the map to search for buildings inside the selected radius."
               title="Toggle radius search. When enabled, click the map to search for buildings inside the selected radius."
             >
-              <span><CircleDot className="tool-inline-icon" aria-hidden="true" strokeWidth={2.2} /> Radius <span className="tool-help" aria-hidden="true">?</span></span>
-              <strong>{nearbySearchEnabled ? 'On' : 'Off'}</strong>
+              <span>
+                <CircleDot
+                  className="tool-inline-icon"
+                  aria-hidden="true"
+                  strokeWidth={2.2}
+                />{" "}
+                Radius{" "}
+                <span className="tool-help" aria-hidden="true">
+                  ?
+                </span>
+              </span>
+              <strong>{nearbySearchEnabled ? "On" : "Off"}</strong>
             </button>
-            <button type="button" className="tool-button icon-tool" onClick={toggleTheme}>
-              <ThemeIcon className="tool-icon" aria-hidden="true" strokeWidth={2.2} />
-              <span className="sr-only">{theme === 'dark' ? 'Dark mode' : 'Light mode'}</span>
+            <button
+              type="button"
+              className="tool-button icon-tool"
+              onClick={toggleTheme}
+            >
+              <ThemeIcon
+                className="tool-icon"
+                aria-hidden="true"
+                strokeWidth={2.2}
+              />
+              <span className="sr-only">
+                {theme === "dark" ? "Dark mode" : "Light mode"}
+              </span>
             </button>
           </div>
 
           <div className="sidebar-collapsible">
             {nearby.results.length > 0 && (
-              <button type="button" className="clear-nearby-button" onClick={clearNearby}>
+              <button
+                type="button"
+                className="clear-nearby-button"
+                onClick={clearNearby}
+              >
                 Clear radius results
               </button>
             )}
 
             <div className="stats-grid">
               <div className="stat-card" title="Visible buildings">
-                <Eye className="stat-card-icon" aria-hidden="true" strokeWidth={2.2} />
+                <Eye
+                  className="stat-card-icon"
+                  aria-hidden="true"
+                  strokeWidth={2.2}
+                />
                 <span className="sr-only">Visible</span>
                 <strong>{featureCount.toLocaleString()}</strong>
               </div>
               <div className="stat-card" title="Loaded buildings">
-                <Download className="stat-card-icon" aria-hidden="true" strokeWidth={2.2} />
+                <Download
+                  className="stat-card-icon"
+                  aria-hidden="true"
+                  strokeWidth={2.2}
+                />
                 <span className="sr-only">Loaded</span>
                 <strong>{totalCount.toLocaleString()}</strong>
               </div>
