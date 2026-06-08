@@ -100,6 +100,11 @@ function firstNestedValue(sources, keys, fallback = '') {
   return fallback;
 }
 
+function municipalityNameFromNumber(value) {
+  const normalized = String(value || '').trim().padStart(4, '0');
+  return normalized === '0301' ? 'Oslo' : '';
+}
+
 const UNIT_NUMBER_KEYS = [
   'bruksenhetsNr',
   'BruksenhetsNr',
@@ -251,7 +256,8 @@ function normalizeProperties(rawProperties = {}, coordinates = []) {
     materialvalg: firstNestedValue(propertySources, ['materialvalg', 'Materialvalg', 'matierialvalg', 'Matierialvalg']),
     poststed: firstNestedValue(propertySources, ['poststed', 'Poststed']),
     postnummer: firstNestedValue(propertySources, ['postnummer', 'Postnummer']),
-    kommunenavn: firstNestedValue(propertySources, ['kommunenavn', 'Kommunenavn']),
+    kommunenavn: firstNestedValue(propertySources, ['kommunenavn', 'Kommunenavn']) ||
+      municipalityNameFromNumber(firstNestedValue(propertySources, ['kommunenummer', 'Kommunenummer', 'kommune', 'Kommune', 'kommuneNr', 'KommuneNr'])),
     kommunenummer: firstNestedValue(propertySources, ['kommunenummer', 'Kommunenummer', 'kommune', 'Kommune', 'kommuneNr', 'KommuneNr']),
     bruksenhetsNr: unitNumber,
     brukenhetsnummer: unitNumber,

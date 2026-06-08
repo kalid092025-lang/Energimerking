@@ -22,6 +22,12 @@ function SearchBar({
   }, []);
 
   const visibleSuggestions = useMemo(() => suggestions.slice(0, 7), [suggestions]);
+  const suggestionLocation = (feature) => (
+    [
+      feature.properties.poststed,
+      feature.properties.kommunenavn
+    ].filter(Boolean).join(' | ') || 'Location not registered'
+  );
 
   return (
     <div className="search-layout">
@@ -60,9 +66,7 @@ function SearchBar({
                       <span className="suggestion-dot" />
                       <span className="suggestion-copy">
                         <strong>{feature.properties.adresse || 'Unknown address'}</strong>
-                        <small>
-                          {feature.properties.poststed || 'Unknown place'} | {feature.properties.kommunenavn || 'Unknown municipality'}
-                        </small>
+                        <small>{suggestionLocation(feature)}</small>
                       </span>
                     </button>
                   ))
