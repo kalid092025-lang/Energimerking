@@ -13,8 +13,9 @@ function buildUrl(path, params = {}) {
   return `${API_BASE_URL}${path}${query ? `?${query}` : ''}`;
 }
 
-async function getJson(path, params) {
+async function getJson(path, params, options = {}) {
   const response = await fetch(buildUrl(path, params), {
+    signal: options.signal,
     headers: {
       Accept: 'application/json'
     }
@@ -46,11 +47,11 @@ const DEFAULT_BUILDING_QUERY = {
   onlyNew: false
 };
 
-export async function fetchBuildingsGeoJson(params = {}) {
+export async function fetchBuildingsGeoJson(params = {}, options = {}) {
   return getJson('/bygg/GetNearbyDeNormGeoJson', {
     ...DEFAULT_BUILDING_QUERY,
     ...params
-  });
+  }, options);
 }
 
 export async function fetchNearbyBuildingsGeoJson({

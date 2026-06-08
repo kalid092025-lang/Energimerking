@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Database, Landmark, PlugZap } from 'lucide-react';
 import { fetchBydelStats } from '../services/api.js';
 import { useStore } from '../store/useStore.js';
 import { OSLO_BYDELER, findBydel } from '../utils/osloBydeler.js';
@@ -277,6 +278,25 @@ function formatCountShare(count, total) {
   return `${percentage(count, total)}% (${count.toLocaleString()})`;
 }
 
+function BydelStatSection({ Icon, children, status = '' }) {
+  return (
+    <div className="bydel-stat-section">
+      <Icon className="bydel-stat-section-icon" aria-hidden="true" strokeWidth={2.2} />
+      <span>{children}</span>
+      {status && <small>{status}</small>}
+    </div>
+  );
+}
+
+function BydelStat({ label, value }) {
+  return (
+    <div className="bydel-stat">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
 function Filters() {
   const viewMode = useStore((state) => state.viewMode);
   const allFeatures = useStore((state) => state.allFeatures);
@@ -413,104 +433,49 @@ function Filters() {
               <strong>{formatRadius(selectedBydel.radiusInMeters)} radius</strong>
             </div>
             <div className="bydel-stats-grid">
-              <div className="bydel-stat">
-                <span>Buildings loaded</span>
-                <strong>{bydelStats.total.toLocaleString()}</strong>
-              </div>
-              <div className="bydel-stat">
-                <span>Average energy use</span>
-                <strong>{formatEnergy(bydelStats.averageEnergy)}</strong>
-              </div>
-              <div className="bydel-stat">
-                <span>Typical energy use</span>
-                <strong>{formatEnergy(bydelStats.medianEnergy)}</strong>
-              </div>
-              <div className="bydel-stat">
-                <span>Most common energy grade</span>
-                <strong>{bydelStats.mostCommonEnergyGrade}</strong>
-              </div>
-              <div className="bydel-stat">
-                <span>Most common heating grade</span>
-                <strong>{bydelStats.mostCommonHeatingGrade}</strong>
-              </div>
-              <div className="bydel-stat">
-                <span>Average build year</span>
-                <strong>{bydelStats.averageBuildYear || 'N/A'}</strong>
-              </div>
-              <div className="bydel-stat">
-                <span>Built before 1980</span>
-                <strong>{bydelStats.oldBuildingShare}%</strong>
-              </div>
-              <div className="bydel-stat">
-                <span>High upgrade priority</span>
-                <strong>{bydelStats.highUpgradeShare}%</strong>
-              </div>
-              <div className="bydel-stat-section">
-                Oslo statistics {externalBydelStatus === 'loading' ? 'loading' : ''}
-              </div>
-              <div className="bydel-stat">
-                <span>Median house price</span>
-                <strong>{formatCurrency(externalBydelStats?.housing?.medianHousePrice)}</strong>
-              </div>
-              <div className="bydel-stat">
-                <span>Price per m2</span>
-                <strong>{formatCurrency(externalBydelStats?.housing?.pricePerM2)}</strong>
-              </div>
-              <div className="bydel-stat">
-                <span>Price trend</span>
-                <strong>{formatPercent(externalBydelStats?.housing?.priceTrendPercent)}</strong>
-              </div>
-              <div className="bydel-stat">
-                <span>Median household income</span>
-                <strong>{formatCurrency(externalBydelStats?.demographics?.medianHouseholdIncome)}</strong>
-              </div>
-              <div className="bydel-stat">
-                <span>Population</span>
-                <strong>{formatNumber(externalBydelStats?.demographics?.population)}</strong>
-              </div>
-              <div className="bydel-stat">
-                <span>Population growth</span>
-                <strong>{formatPercent(externalBydelStats?.demographics?.populationGrowthPercent)}</strong>
-              </div>
-              <div className="bydel-stat-section">NOBIL chargers</div>
-              <div className="bydel-stat">
-                <span>Public chargers</span>
-                <strong>{formatNumber(externalBydelStats?.chargers?.publicChargers)}</strong>
-              </div>
-              <div className="bydel-stat">
-                <span>Fast chargers</span>
-                <strong>{formatNumber(externalBydelStats?.chargers?.fastChargers)}</strong>
-              </div>
+              <BydelStatSection Icon={Database}>Database stats</BydelStatSection>
+              <BydelStat label="Buildings" value={bydelStats.total.toLocaleString()} />
+              <BydelStat label="Avg energy" value={formatEnergy(bydelStats.averageEnergy)} />
+              <BydelStat label="Typical energy" value={formatEnergy(bydelStats.medianEnergy)} />
+              <BydelStat label="Common energy grade" value={bydelStats.mostCommonEnergyGrade} />
+              <BydelStat label="Common heating" value={bydelStats.mostCommonHeatingGrade} />
+              <BydelStat label="Avg build year" value={bydelStats.averageBuildYear || 'N/A'} />
+              <BydelStat label="Before 1980" value={`${bydelStats.oldBuildingShare}%`} />
+              <BydelStat label="High upgrade" value={`${bydelStats.highUpgradeShare}%`} />
+              {['A', 'B', 'C', 'D', 'E', 'F', 'G'].map((grade) => (
+                <BydelStat
+                  key={grade}
+                  label={`Energy ${grade}`}
+                  value={formatCountShare(bydelStats.energyGradeCounts[grade], bydelStats.total)}
+                />
+              ))}
+              <BydelStat label="Heating green" value={formatCountShare(bydelStats.heatingGradeCounts.GREEN, bydelStats.total)} />
+              <BydelStat label="Heating yellow" value={formatCountShare(bydelStats.heatingGradeCounts.YELLOW, bydelStats.total)} />
+              <BydelStat label="Heating orange" value={formatCountShare(bydelStats.heatingGradeCounts.ORANGE, bydelStats.total)} />
+              <BydelStat label="Heating red" value={formatCountShare(bydelStats.heatingGradeCounts.RED, bydelStats.total)} />
+
+              <BydelStatSection
+                Icon={Landmark}
+                status={externalBydelStatus === 'loading' ? 'loading' : ''}
+              >
+                SSB / Oslo stats
+              </BydelStatSection>
+              <BydelStat label="Median price" value={formatCurrency(externalBydelStats?.housing?.medianHousePrice)} />
+              <BydelStat label="Price per m2" value={formatCurrency(externalBydelStats?.housing?.pricePerM2)} />
+              <BydelStat label="Price trend" value={formatPercent(externalBydelStats?.housing?.priceTrendPercent)} />
+              <BydelStat label="Median income" value={formatCurrency(externalBydelStats?.demographics?.medianHouseholdIncome)} />
+              <BydelStat label="Population" value={formatNumber(externalBydelStats?.demographics?.population)} />
+              <BydelStat label="Population growth" value={formatPercent(externalBydelStats?.demographics?.populationGrowthPercent)} />
+
+              <BydelStatSection Icon={PlugZap}>NOBIL stats</BydelStatSection>
+              <BydelStat label="Public chargers" value={formatNumber(externalBydelStats?.chargers?.publicChargers)} />
+              <BydelStat label="Fast chargers" value={formatNumber(externalBydelStats?.chargers?.fastChargers)} />
               {externalBydelStatus === 'error' && (
                 <div className="bydel-stat-note">External bydel stats are unavailable.</div>
               )}
               {externalBydelStats?.chargers?.status && (
                 <div className="bydel-stat-note">{externalBydelStats.chargers.status}</div>
               )}
-              <div className="bydel-stat-section">Energy grades</div>
-              {['A', 'B', 'C', 'D', 'E', 'F', 'G'].map((grade) => (
-                <div key={grade} className="bydel-stat">
-                  <span>Grade {grade}</span>
-                  <strong>{formatCountShare(bydelStats.energyGradeCounts[grade], bydelStats.total)}</strong>
-                </div>
-              ))}
-              <div className="bydel-stat-section">Heating grades</div>
-              <div className="bydel-stat">
-                <span>Green heating</span>
-                <strong>{formatCountShare(bydelStats.heatingGradeCounts.GREEN, bydelStats.total)}</strong>
-              </div>
-              <div className="bydel-stat">
-                <span>Yellow heating</span>
-                <strong>{formatCountShare(bydelStats.heatingGradeCounts.YELLOW, bydelStats.total)}</strong>
-              </div>
-              <div className="bydel-stat">
-                <span>Orange heating</span>
-                <strong>{formatCountShare(bydelStats.heatingGradeCounts.ORANGE, bydelStats.total)}</strong>
-              </div>
-              <div className="bydel-stat">
-                <span>Red heating</span>
-                <strong>{formatCountShare(bydelStats.heatingGradeCounts.RED, bydelStats.total)}</strong>
-              </div>
             </div>
           </div>
         )}

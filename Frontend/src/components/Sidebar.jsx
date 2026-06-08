@@ -1,4 +1,4 @@
-import { CircleDot, Moon, SlidersHorizontal, Sun } from 'lucide-react';
+import { CircleDot, Download, Eye, Moon, SlidersHorizontal, Sun } from 'lucide-react';
 import { useStore } from '../store/useStore.js';
 import Filters from './Filters.jsx';
 import '../styles/sidebar.css';
@@ -53,12 +53,14 @@ function Sidebar({ featureCount, totalCount, isSearchingNearby }) {
             )}
 
             <div className="stats-grid">
-              <div className="stat-card">
-                <span>Visible</span>
+              <div className="stat-card" title="Visible buildings">
+                <Eye className="stat-card-icon" aria-hidden="true" strokeWidth={2.2} />
+                <span className="sr-only">Visible</span>
                 <strong>{featureCount.toLocaleString()}</strong>
               </div>
-              <div className="stat-card">
-                <span>Loaded</span>
+              <div className="stat-card" title="Loaded buildings">
+                <Download className="stat-card-icon" aria-hidden="true" strokeWidth={2.2} />
+                <span className="sr-only">Loaded</span>
                 <strong>{totalCount.toLocaleString()}</strong>
               </div>
             </div>

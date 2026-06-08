@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import MapView from './components/MapView.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import SearchBar from './components/SearchBar.jsx';
@@ -72,6 +72,7 @@ function App() {
   const setSearchQuery = useStore((state) => state.setSearchQuery);
   const [isSearchingNearby, setIsSearchingNearby] = useState(false);
   const [searchSelection, setSearchSelection] = useState(null);
+  const bydelCacheRef = useRef(new Map());
 
   useEffect(() => {
     document.body.classList.toggle('theme-dark', theme === 'dark');
@@ -79,7 +80,32 @@ function App() {
 
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     const bydel = findBydel(selectedBydelId);
+    const cachedFeatures = bydelCacheRef.current.get(selectedBydelId);
+
+    const applyBydelData = (features) => {
+      setAllFeatures(features);
+      initializeFilters(buildInitialFilterBounds(features));
+      setNearby({
+        center: {
+          latitude: bydel.latitude,
+          longitude: bydel.longitude
+        },
+        radiusInMeters: bydel.radiusInMeters,
+        results: []
+      });
+    };
+
+    if (cachedFeatures) {
+      setError('');
+      setLoading(false);
+      applyBydelData(cachedFeatures);
+      return () => {
+        active = false;
+        controller.abort();
+      };
+    }
 
     async function loadData() {
       try {
@@ -90,21 +116,16 @@ function App() {
           longitude: bydel.longitude,
           radiusInMeters: bydel.radiusInMeters,
           amount: 20000
+        }, {
+          signal: controller.signal
         });
         if (!active) return;
         const normalized = normalizeGeoJson(payload);
-        setAllFeatures(normalized.features);
-        initializeFilters(buildInitialFilterBounds(normalized.features));
-        setNearby({
-          center: {
-            latitude: bydel.latitude,
-            longitude: bydel.longitude
-          },
-          radiusInMeters: bydel.radiusInMeters,
-          results: []
-        });
+        bydelCacheRef.current.set(selectedBydelId, normalized.features);
+        applyBydelData(normalized.features);
       } catch (loadError) {
         if (!active) return;
+        if (loadError?.name === 'AbortError') return;
         setAllFeatures([]);
         initializeFilters(buildInitialFilterBounds([]));
         setError(extractErrorMessage(loadError, 'Failed to load building data.'));
@@ -116,6 +137,7 @@ function App() {
     loadData();
     return () => {
       active = false;
+      controller.abort();
     };
   }, [initializeFilters, selectedBydelId, setAllFeatures, setError, setLoading, setNearby]);
 
