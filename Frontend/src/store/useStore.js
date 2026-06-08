@@ -11,7 +11,7 @@ export const useStore = create((set) => ({
   isLoading: false,
   error: '',
   viewMode: 'markers',
-  selectedBydelId: 'all',
+  selectedBydelId: 'gamle-oslo',
   nearbySearchEnabled: false,
   radiusInMeters: 5000,
   searchQuery: '',
