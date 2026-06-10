@@ -1,11 +1,12 @@
-<Project Sdk="Microsoft.NET.Sdk.web">
+﻿<Project Sdk="Microsoft.NET.Sdk.web">
 
     <PropertyGroup>
         <OutputType>Exe</OutputType>
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
-    </PropertyGroup>
+      <UserSecretsId>fca1daf8-4e40-4a13-8762-ce214e9cf653</UserSecretsId>
+  </PropertyGroup>
 
     <ItemGroup>
       <Folder Include="Controllers\" />

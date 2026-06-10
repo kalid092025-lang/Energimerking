@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace WebApi.Controllers;
 
@@ -11,6 +12,8 @@ public class BydelStatsController : ControllerBase
     private const string OsloPxWebBaseUrl = "https://statistikkbanken.oslo.kommune.no/statbank/api/v1/no/db1";
     private const string SsbPxWebV2BaseUrl = "https://data.ssb.no/api/pxwebapi/v2/tables";
     private const string NobilSearchUrl = "https://nobil.no/api/server/search.php";
+    private const string BydelStatsCacheKeyPrefix = "bydel-stats:";
+    private static readonly TimeSpan BydelStatsCacheDuration = TimeSpan.FromHours(6);
 
     private static readonly IReadOnlyDictionary<string, BydelInfo> Bydeler = new Dictionary<string, BydelInfo>
     {
@@ -35,15 +38,18 @@ public class BydelStatsController : ControllerBase
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
     private readonly ILogger<BydelStatsController> _logger;
+    private readonly IMemoryCache _cache;
 
     public BydelStatsController(
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
-        ILogger<BydelStatsController> logger)
+        ILogger<BydelStatsController> logger,
+        IMemoryCache cache)
     {
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
         _logger = logger;
+        _cache = cache;
     }
 
     [HttpGet("{bydelId}")]
@@ -54,6 +60,20 @@ public class BydelStatsController : ControllerBase
             return NotFound(new { message = $"Unknown Oslo bydel: {bydelId}" });
         }
 
+        var payload = await _cache.GetOrCreateAsync<object>(
+            $"{BydelStatsCacheKeyPrefix}{bydelId}",
+            async entry =>
+            {
+                entry.AbsoluteExpirationRelativeToNow = BydelStatsCacheDuration;
+                entry.Priority = CacheItemPriority.Normal;
+                return await BuildBydelStatsResponse(bydelId, bydel);
+            });
+
+        return Ok(payload);
+    }
+
+    private async Task<object> BuildBydelStatsResponse(string bydelId, BydelInfo bydel)
+    {
         var housingTask = GetHousingStats(bydel);
         var populationTask = GetPopulationStats(bydel);
         var incomeTask = GetIncomeStats(bydel);
@@ -61,7 +81,7 @@ public class BydelStatsController : ControllerBase
 
         await Task.WhenAll(housingTask, populationTask, incomeTask, chargerTask);
 
-        return Ok(new
+        return new
         {
             id = bydelId,
             name = bydel.Name,
@@ -80,7 +100,7 @@ public class BydelStatsController : ControllerBase
                 "SSB Statbank API v2: 06944, 10826",
                 "NOBIL database"
             }
-        });
+        };
     }
 
     private async Task<object> GetHousingStats(BydelInfo bydel)
