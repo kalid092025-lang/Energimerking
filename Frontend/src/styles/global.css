@@ -1,5 +1,7 @@
 :root {
-  font-family: Arial, "Helvetica Neue", system-ui, sans-serif;
+  --font-sans: "Work Sans", Arial, "Helvetica Neue", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-sans);
   line-height: 1.5;
   font-weight: 400;
   color: #0f172a;
@@ -57,7 +59,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -143,4 +146,23 @@ button {
 .maplibregl-ctrl-group {
   border-radius: 8px;
   box-shadow: var(--shadow);
+}
+
+.filter-range-value,
+.bydel-meta strong,
+.bydel-stat strong,
+.mode-toggle,
+.tool-button strong,
+.zoom-readout,
+.legend-scale strong,
+.energy-badge strong,
+.priority-badge strong,
+.score-row-label strong,
+.energy-badge-small,
+.popup-metric-value,
+.popup-metric strong,
+.popup-value,
+.popup-detail strong,
+.nearby-unit-distance {
+  font-family: var(--font-mono);
 }

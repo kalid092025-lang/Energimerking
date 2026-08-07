@@ -105,6 +105,76 @@ function municipalityNameFromNumber(value) {
   return normalized === '0301' ? 'Oslo' : '';
 }
 
+const ENOVA_2026_START_TIMESTAMP = Date.UTC(2026, 0, 1);
+
+export const CERTIFICATE_SCHEME_LABELS = {
+  all: 'All methods',
+  '2026': '2026 method',
+  legacy: 'Before 2026',
+  unknown: 'Unknown date'
+};
+
+const CERTIFICATE_DATE_KEYS = [
+  'utstedelsesdato',
+  'Utstedelsesdato',
+  'utstedelsesDato',
+  'UtstedelsesDato',
+  'issuedAt',
+  'IssuedAt'
+];
+
+function parseDateTimestamp(value) {
+  if (!value) return null;
+
+  if (value instanceof Date) {
+    const timestamp = value.getTime();
+    return Number.isFinite(timestamp) ? timestamp : null;
+  }
+
+  const text = String(value).trim();
+  if (!text) return null;
+
+  const parsed = Date.parse(text);
+  if (Number.isFinite(parsed)) {
+    return parsed;
+  }
+
+  const norwegianDate = text.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})/);
+  if (norwegianDate) {
+    const [, day, month, year] = norwegianDate;
+    const timestamp = Date.UTC(Number(year), Number(month) - 1, Number(day));
+    return Number.isFinite(timestamp) ? timestamp : null;
+  }
+
+  return null;
+}
+
+function dateYear(value) {
+  const timestamp = parseDateTimestamp(value);
+  return timestamp === null ? null : new Date(timestamp).getUTCFullYear();
+}
+
+export function certificateSchemeLabel(scheme) {
+  return CERTIFICATE_SCHEME_LABELS[scheme] || CERTIFICATE_SCHEME_LABELS.unknown;
+}
+
+export function getCertificateScheme(value) {
+  const timestamp = parseDateTimestamp(value);
+  if (timestamp === null) return 'unknown';
+  return timestamp >= ENOVA_2026_START_TIMESTAMP ? '2026' : 'legacy';
+}
+
+function latestObjectByDate(items, dateKeys = CERTIFICATE_DATE_KEYS) {
+  const candidates = asArray(items);
+  if (candidates.length === 0) return {};
+
+  return [...candidates].sort((left, right) => {
+    const leftTimestamp = parseDateTimestamp(firstValue(left, dateKeys, null)) ?? Number.NEGATIVE_INFINITY;
+    const rightTimestamp = parseDateTimestamp(firstValue(right, dateKeys, null)) ?? Number.NEGATIVE_INFINITY;
+    return rightTimestamp - leftTimestamp;
+  })[0] || {};
+}
+
 const UNIT_NUMBER_KEYS = [
   'bruksenhetsNr',
   'BruksenhetsNr',
@@ -210,6 +280,11 @@ function normalizeAttest(normalized, attest) {
 
   if (typeof attest !== 'string') return;
 
+  const issuedMatch = attest.match(/utstedelsesdato=([^,}\]]+)/i);
+  if (issuedMatch && !normalized.utstedelsesdato) {
+    normalized.utstedelsesdato = issuedMatch[1].trim();
+  }
+
   const energyMatch = attest.match(/beregnetLevertEnergiTotaltkWhm2=([0-9]+(?:\.[0-9]+)?)/i);
   if (energyMatch && (!normalized.energibruk_kwh_m2 || normalized.energibruk_kwh_m2 === 0)) {
     normalized.energibruk_kwh_m2 = toNumber(energyMatch[1], normalized.energibruk_kwh_m2 || 0);
@@ -233,14 +308,19 @@ function normalizeAttest(normalized, attest) {
 function normalizeProperties(rawProperties = {}, coordinates = []) {
   const eiendommer = asArray(firstValue(rawProperties, ['eiendommer', 'eiendom'], []));
   const firstEiendom = firstObject(eiendommer);
-  const firstAttest = firstObject(firstValue(firstEiendom, ['attestListe', 'attestliste', 'attestListeRaw'], []));
-  const propertySources = [rawProperties, firstEiendom, firstAttest];
+  const latestAttest = latestObjectByDate([
+    ...asArray(firstValue(rawProperties, ['attestListe', 'attestliste', 'attestListeRaw'], [])),
+    ...asArray(firstValue(firstEiendom, ['attestListe', 'attestliste', 'attestListeRaw'], []))
+  ]);
+  const propertySources = [rawProperties, firstEiendom, latestAttest];
   const unitNumber = firstUnitNumber(propertySources, eiendommer);
   const id = firstValue(
     rawProperties,
     ['id', 'denormId', 'DenormId', 'coordinateid', 'Coordinateid', 'CoordinateId', 'Bygningsnummer', 'bygningsnummer'],
     `${coordinates[0] || 0}-${coordinates[1] || 0}`
   );
+  const issuedDate = firstNestedValue(propertySources, CERTIFICATE_DATE_KEYS);
+  const certificateScheme = getCertificateScheme(issuedDate);
   const normalized = {
     id,
     Bygningsnummer: firstNestedValue(propertySources, ['Bygningsnummer', 'bygningsnummer']),
@@ -252,8 +332,15 @@ function normalizeProperties(rawProperties = {}, coordinates = []) {
     adresse: firstNestedValue(propertySources, ['adresse', 'Adresse']),
     attestnummer: firstNestedValue(propertySources, ['attestnummer', 'Attestnummer', 'attestNr', 'AttestNr']),
     organisasjonsNr: firstNestedValue(propertySources, ['organisasjonsNr', 'OrganisasjonsNr', 'organisasjonsnummer', 'Organisasjonsnummer']),
-    utstedelsesdato: firstNestedValue(propertySources, ['utstedelsesdato', 'Utstedelsesdato', 'utstedelsesDato', 'UtstedelsesDato']),
+    utstedelsesdato: issuedDate,
     materialvalg: firstNestedValue(propertySources, ['materialvalg', 'Materialvalg', 'matierialvalg', 'Matierialvalg']),
+    dataSource: firstNestedValue(propertySources, ['dataSource', 'DataSource', 'source', 'Source', 'kilde', 'Kilde'], 'Local Enova energy certificate data'),
+    sourceApiVersion: firstNestedValue(propertySources, ['sourceApiVersion', 'SourceApiVersion', 'apiVersion', 'ApiVersion']),
+    lastSyncedAt: firstNestedValue(propertySources, ['lastSyncedAt', 'LastSyncedAt', 'importedAt', 'ImportedAt']),
+    certificateScheme,
+    certificateSchemeLabel: certificateSchemeLabel(certificateScheme),
+    certificateIssuedTimestamp: parseDateTimestamp(issuedDate),
+    certificateIssuedYear: dateYear(issuedDate),
     poststed: firstNestedValue(propertySources, ['poststed', 'Poststed']),
     postnummer: firstNestedValue(propertySources, ['postnummer', 'Postnummer']),
     kommunenavn: firstNestedValue(propertySources, ['kommunenavn', 'Kommunenavn']) ||
@@ -443,6 +530,68 @@ export function buildInitialFilterBounds(features) {
   };
 }
 
+function normalizedIdentityPart(value) {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function featureCoordinateKey(feature) {
+  const [longitude, latitude] = feature?.geometry?.coordinates || [];
+  if (!Number.isFinite(Number(longitude)) || !Number.isFinite(Number(latitude))) return '';
+  return `${Number(longitude).toFixed(5)}:${Number(latitude).toFixed(5)}`;
+}
+
+function certificateIdentityKey(feature) {
+  const props = feature?.properties || {};
+  const buildingNumber = firstValue(props, ['Bygningsnummer', 'bygningsnummer']);
+  const unitNumber = firstValue(props, UNIT_NUMBER_KEYS);
+
+  if (buildingNumber) {
+    return `building:${normalizedIdentityPart(buildingNumber)}:${normalizedIdentityPart(unitNumber)}`;
+  }
+
+  const matrikkel = [
+    props.kommunenummer,
+    props.gard,
+    props.bruksnummer,
+    props.feste,
+    props.seksjon,
+    props.andel,
+    unitNumber
+  ].map(normalizedIdentityPart);
+
+  if (matrikkel.slice(0, 3).every(Boolean)) {
+    return `matrikkel:${matrikkel.join(':')}`;
+  }
+
+  return [
+    'location',
+    featureCoordinateKey(feature),
+    normalizedIdentityPart(props.adresse),
+    normalizedIdentityPart(unitNumber)
+  ].join(':');
+}
+
+function certificateTimestamp(feature) {
+  const directTimestamp = Number(feature?.properties?.certificateIssuedTimestamp);
+  if (Number.isFinite(directTimestamp)) return directTimestamp;
+  return parseDateTimestamp(feature?.properties?.utstedelsesdato) ?? Number.NEGATIVE_INFINITY;
+}
+
+export function getLatestCertificateFeatures(features) {
+  const latestByIdentity = new Map();
+
+  features.forEach((feature) => {
+    const key = certificateIdentityKey(feature);
+    const current = latestByIdentity.get(key);
+
+    if (!current || certificateTimestamp(feature) > certificateTimestamp(current)) {
+      latestByIdentity.set(key, feature);
+    }
+  });
+
+  return Array.from(latestByIdentity.values());
+}
+
 export function filterFeatures(features, filters) {
   const [yearMin, yearMax] = filters.byggeaar;
   const [energyMin, energyMax] = filters.energibruk_kwh_m2;
@@ -464,8 +613,12 @@ export function filterFeatures(features, filters) {
     const matchesHeatingGrade =
       filters.oppvarmingskarakter === 'all' ||
       props.oppvarmingskarakter === filters.oppvarmingskarakter;
+    const matchesCertificateScheme =
+      !filters.certificateScheme ||
+      filters.certificateScheme === 'all' ||
+      props.certificateScheme === filters.certificateScheme;
 
-    return matchesYear && matchesEnergy && matchesEnergyGrade && matchesHeatingGrade;
+    return matchesYear && matchesEnergy && matchesEnergyGrade && matchesHeatingGrade && matchesCertificateScheme;
   });
 }
 

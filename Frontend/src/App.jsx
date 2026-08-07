@@ -7,6 +7,7 @@ import { useStore } from './store/useStore.js';
 import {
   buildInitialFilterBounds,
   filterFeatures,
+  getLatestCertificateFeatures,
   getSearchSuggestions,
   normalizeGeoJson
 } from './utils/filtering.js';
@@ -86,7 +87,7 @@ function App() {
 
     const applyBydelData = (features) => {
       setAllFeatures(features);
-      initializeFilters(buildInitialFilterBounds(features));
+      initializeFilters(buildInitialFilterBounds(getLatestCertificateFeatures(features)));
       setNearby({
         center: {
           latitude: bydel.latitude,
@@ -141,23 +142,27 @@ function App() {
     };
   }, [initializeFilters, selectedBydelId, setAllFeatures, setError, setLoading, setNearby]);
 
+  const displayFeatures = useMemo(
+    () => filters.latestOnly ? getLatestCertificateFeatures(allFeatures) : allFeatures,
+    [allFeatures, filters.latestOnly]
+  );
   const filteredFeatures = useMemo(
-    () => filterFeatures(allFeatures, filters),
-    [allFeatures, filters]
+    () => filterFeatures(displayFeatures, filters),
+    [displayFeatures, filters]
   );
   const selectedBydel = useMemo(() => findBydel(selectedBydelId), [selectedBydelId]);
   const suggestions = useMemo(
-    () => getSearchSuggestions(allFeatures, searchQuery),
-    [allFeatures, searchQuery]
+    () => getSearchSuggestions(displayFeatures, searchQuery),
+    [displayFeatures, searchQuery]
   );
   const selectedFeatureFromList = useMemo(() => {
     if (!selectedFeature?.id) return null;
     return (
       filteredFeatures.find((feature) => feature.id === selectedFeature.id) ||
-      allFeatures.find((feature) => feature.id === selectedFeature.id) ||
+      displayFeatures.find((feature) => feature.id === selectedFeature.id) ||
       null
     );
-  }, [allFeatures, filteredFeatures, selectedFeature]);
+  }, [displayFeatures, filteredFeatures, selectedFeature]);
 
   const handleSuggestionSelect = (feature) => {
     setSelectedFeature(feature);
@@ -187,7 +192,10 @@ function App() {
         amount: 2000
       });
       const normalized = normalizeGeoJson(payload);
-      const results = normalized.features
+      const nearbyFeatures = filters.latestOnly
+        ? getLatestCertificateFeatures(normalized.features)
+        : normalized.features;
+      const results = nearbyFeatures
         .map((feature) => {
           const [featureLongitude, featureLatitude] = feature.geometry.coordinates;
           const featurePoint = {
@@ -234,8 +242,6 @@ function App() {
       <div className="app-background" />
       <div className="app-layout">
         <Sidebar
-          featureCount={filteredFeatures.length}
-          totalCount={allFeatures.length}
           isSearchingNearby={isSearchingNearby}
         />
         <main className="app-main">
@@ -248,7 +254,7 @@ function App() {
           </div>
           <MapView
             features={filteredFeatures}
-            allFeaturesCount={allFeatures.length}
+            allFeaturesCount={displayFeatures.length}
             selectedFeature={selectedFeatureFromList}
             searchSelection={searchSelection}
             nearbyState={nearby}

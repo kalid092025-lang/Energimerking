@@ -391,7 +391,7 @@
   background: transparent;
   color: inherit;
   appearance: none;
-  font-family: Arial, sans-serif;
+  font-family: var(--font-sans);
   font-size: 0.62rem;
   font-weight: 800;
   line-height: 16px;

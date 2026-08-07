@@ -30,6 +30,18 @@
   box-shadow: var(--shadow);
 }
 
+.map-legend {
+  border-color: #dedde6;
+  background: #f6f5f9;
+  box-shadow: 10px 0 28px rgba(38, 38, 54, 0.06);
+}
+
+.theme-dark .map-legend {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: #232427;
+  box-shadow: 14px 0 34px rgba(0, 0, 0, 0.28);
+}
+
 .chrome-button {
   padding: 0 16px;
   height: 48px;

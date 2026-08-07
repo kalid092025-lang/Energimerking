@@ -27,7 +27,9 @@ export const useStore = create((set) => ({
     byggeaar: defaultBounds.byggeaar,
     energibruk_kwh_m2: defaultBounds.energibruk_kwh_m2,
     energikarakter: [],
-    oppvarmingskarakter: 'all'
+    oppvarmingskarakter: 'all',
+    latestOnly: true,
+    certificateScheme: 'all'
   },
   toggleTheme: () =>
     set((state) => ({
@@ -85,7 +87,9 @@ export const useStore = create((set) => ({
         byggeaar: bounds.byggeaar,
         energibruk_kwh_m2: bounds.energibruk_kwh_m2,
         energikarakter: [],
-        oppvarmingskarakter: 'all'
+        oppvarmingskarakter: 'all',
+        latestOnly: true,
+        certificateScheme: 'all'
       }
     }),
   updateRange: (key, value) =>
@@ -108,7 +112,9 @@ export const useStore = create((set) => ({
         byggeaar: state.filterBounds.byggeaar,
         energibruk_kwh_m2: state.filterBounds.energibruk_kwh_m2,
         energikarakter: [],
-        oppvarmingskarakter: 'all'
+        oppvarmingskarakter: 'all',
+        latestOnly: true,
+        certificateScheme: 'all'
       }
     }))
 }));

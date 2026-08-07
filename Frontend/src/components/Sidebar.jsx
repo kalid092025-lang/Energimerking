@@ -1,7 +1,5 @@
 import {
   CircleDot,
-  Download,
-  Eye,
   Moon,
   SlidersHorizontal,
   Sun,
@@ -10,7 +8,7 @@ import { useStore } from "../store/useStore.js";
 import Filters from "./Filters.jsx";
 import "../styles/sidebar.css";
 
-function Sidebar({ featureCount, totalCount, isSearchingNearby }) {
+function Sidebar({ isSearchingNearby }) {
   const sidebarOpen = useStore((state) => state.sidebarOpen);
   const theme = useStore((state) => state.theme);
   const nearbySearchEnabled = useStore((state) => state.nearbySearchEnabled);
@@ -86,27 +84,6 @@ function Sidebar({ featureCount, totalCount, isSearchingNearby }) {
                 Clear radius results
               </button>
             )}
-
-            <div className="stats-grid">
-              <div className="stat-card" title="Visible buildings">
-                <Eye
-                  className="stat-card-icon"
-                  aria-hidden="true"
-                  strokeWidth={2.2}
-                />
-                <span className="sr-only">Visible</span>
-                <strong>{featureCount.toLocaleString()}</strong>
-              </div>
-              <div className="stat-card" title="Loaded buildings">
-                <Download
-                  className="stat-card-icon"
-                  aria-hidden="true"
-                  strokeWidth={2.2}
-                />
-                <span className="sr-only">Loaded</span>
-                <strong>{totalCount.toLocaleString()}</strong>
-              </div>
-            </div>
 
             {isSearchingNearby && (
               <div className="sidebar-alert">
