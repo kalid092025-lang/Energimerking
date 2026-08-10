@@ -168,7 +168,8 @@ public class EnergimerkingService(DbContexts.EnergimerkingContext context) : DbC
         double longitude = 10.8,
         int amount = 10,
         double radiusInMeters = 2500,
-        bool onlyNew = false)
+        bool onlyNew = false,
+        int skip = 0)
     {
 
         
@@ -183,7 +184,11 @@ public class EnergimerkingService(DbContexts.EnergimerkingContext context) : DbC
             .Where(d => d.KommuneNr != null &&
                         d.Coordinate != null &&
                         d.Coordinate.IsWithinDistance(searchPoint, radiusInMeters))
-            .Take(amount).AsNoTracking().ToListAsync();
+            .OrderBy(d => d.Id)
+            .Skip(skip)
+            .Take(amount)
+            .AsNoTracking()
+            .ToListAsync();
 
         //IEnumerable<List<DenormMatrikkelOgEnovaOslo>> filterlist = null; 
         List<DenormMatrikkelOgEnovaOsloGeojsonDto> geoJsonDtos = null;
@@ -201,6 +206,49 @@ public class EnergimerkingService(DbContexts.EnergimerkingContext context) : DbC
         else
         {
             
+        }
+
+        var jsonSerializer = new GeojsonSerializer<DenormMatrikkelOgEnovaOsloGeojsonDto>(geoJsonDtos);
+        return jsonSerializer.Json;
+    }
+
+    public async Task<string> GetBoundsDeNormGeoJson(
+        double minLatitude,
+        double minLongitude,
+        double maxLatitude,
+        double maxLongitude,
+        int amount = 10,
+        bool onlyNew = false,
+        int skip = 0)
+    {
+        var minLat = (decimal)Math.Min(minLatitude, maxLatitude);
+        var maxLat = (decimal)Math.Max(minLatitude, maxLatitude);
+        var minLon = (decimal)Math.Min(minLongitude, maxLongitude);
+        var maxLon = (decimal)Math.Max(minLongitude, maxLongitude);
+
+        var deNormList = await context.DenormMatrikkelOgEnovaOslos
+            .Where(d => d.KommuneNr != null &&
+                        d.Coordinate != null &&
+                        d.Lat != null &&
+                        d.Lon != null &&
+                        d.Lat >= minLat &&
+                        d.Lat <= maxLat &&
+                        d.Lon >= minLon &&
+                        d.Lon <= maxLon)
+            .OrderBy(d => d.Id)
+            .Skip(skip)
+            .Take(amount)
+            .AsNoTracking()
+            .ToListAsync();
+
+        List<DenormMatrikkelOgEnovaOsloGeojsonDto> geoJsonDtos = null;
+        if (!onlyNew)
+        {
+            var filterlist = deNormList.GroupBy(d => (d.KommuneNr, d.GaardsNr, d.BruksNr, d.Adresse))
+                .Select(dg => dg.ToList());
+            var geoJsonDtoIE =
+                filterlist.Select(l => new DenormMatrikkelOgEnovaOsloGeojsonDto(l));
+            geoJsonDtos = geoJsonDtoIE.ToList();
         }
 
         var jsonSerializer = new GeojsonSerializer<DenormMatrikkelOgEnovaOsloGeojsonDto>(geoJsonDtos);

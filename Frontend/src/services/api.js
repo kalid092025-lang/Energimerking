@@ -54,6 +54,10 @@ export async function fetchBuildingsGeoJson(params = {}, options = {}) {
   }, options);
 }
 
+export async function fetchBuildingsBoundsGeoJson(params = {}, options = {}) {
+  return getJson('/bygg/GetBoundsDeNormGeoJson', params, options);
+}
+
 export async function fetchNearbyBuildingsGeoJson({
   latitude,
   longitude,

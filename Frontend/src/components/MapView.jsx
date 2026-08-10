@@ -1,15 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import { Flame, Layers, MapPin, TrendingUp } from 'lucide-react';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import { fetchBuildingsBoundsGeoJson } from '../services/api.js';
 import { useStore } from '../store/useStore.js';
 import { buildFeatureCollection, buildNearbyCircleGeoJson, buildNearbyGeoJson } from '../utils/geo.js';
+import { normalizeGeoJson } from '../utils/filtering.js';
 import {
   DARK_MAP_STYLE_URL,
   DEFAULT_CENTER,
   DEFAULT_ZOOM,
-  ENERGY_TILE_SOURCE_LAYER,
-  ENERGY_TILE_URL,
   LAYER_IDS,
   LIGHT_MAP_STYLE_URL,
   SOURCE_IDS
@@ -253,16 +253,8 @@ function popupHtmlForMode(properties, mode) {
   return mode === 'upgrade' ? upgradePopupHtml(properties) : popupHtml(properties);
 }
 
-function tilePropertiesToPopupProperties(properties = {}) {
-  return {
-    id: properties.id,
-    adresse: properties.adresse,
-    energikarakter: properties.energikarakter,
-    oppvarmingskarakter: properties.oppvarmingskarakter,
-    beregnetLevertEnergiTotaltkWhm2: properties.beregnetLevertEnergiTotaltkWhm2,
-    energibruk_kwh_m2: properties.beregnetLevertEnergiTotaltkWhm2,
-    attestnummer: properties.attestNr
-  };
+function tilePopupHtml(properties) {
+  return popupHtml(properties);
 }
 
 function idsMatch(left, right) {
@@ -672,6 +664,181 @@ function setLayerVisibility(map, layerId, visibility) {
   }
 }
 
+const MIN_GEOJSON_TILE_ZOOM = 12;
+const GEOJSON_TILE_LOAD_STEPS = [5000, 10000, 50000];
+const MAX_GEOJSON_TILE_FEATURES = GEOJSON_TILE_LOAD_STEPS[GEOJSON_TILE_LOAD_STEPS.length - 1];
+const MAX_GEOJSON_TILE_CACHE_ENTRIES = 24;
+const MAX_GEOJSON_TILE_LOADED_AREAS = 48;
+const GEOJSON_TILE_MOVE_DEBOUNCE_MS = 700;
+const GEOJSON_TILE_CACHE_ZOOM_STEP = 0.5;
+const GEOJSON_TILE_CACHE_BOUNDS_STEP_DEGREES = 0.005;
+
+function snapNumber(value, step, decimals) {
+  return Number((Math.round(value / step) * step).toFixed(decimals));
+}
+
+function snapBoundsOut(bounds, step) {
+  return {
+    west: Number((Math.floor(bounds.west / step) * step).toFixed(3)),
+    south: Number((Math.floor(bounds.south / step) * step).toFixed(3)),
+    east: Number((Math.ceil(bounds.east / step) * step).toFixed(3)),
+    north: Number((Math.ceil(bounds.north / step) * step).toFixed(3))
+  };
+}
+
+function boundsKey(bounds) {
+  return [
+    bounds.west.toFixed(3),
+    bounds.south.toFixed(3),
+    bounds.east.toFixed(3),
+    bounds.north.toFixed(3)
+  ].join(':');
+}
+
+function isValidBounds(bounds) {
+  return bounds.east - bounds.west > 0.0001 && bounds.north - bounds.south > 0.0001;
+}
+
+function boundsOverlap(left, right) {
+  return (
+    left.west < right.east &&
+    left.east > right.west &&
+    left.south < right.north &&
+    left.north > right.south
+  );
+}
+
+function subtractBounds(bounds, coveredBounds) {
+  if (!boundsOverlap(bounds, coveredBounds)) return [bounds];
+
+  const overlap = {
+    west: Math.max(bounds.west, coveredBounds.west),
+    south: Math.max(bounds.south, coveredBounds.south),
+    east: Math.min(bounds.east, coveredBounds.east),
+    north: Math.min(bounds.north, coveredBounds.north)
+  };
+  const missingBounds = [];
+
+  if (bounds.west < overlap.west) {
+    missingBounds.push({ west: bounds.west, south: bounds.south, east: overlap.west, north: bounds.north });
+  }
+  if (overlap.east < bounds.east) {
+    missingBounds.push({ west: overlap.east, south: bounds.south, east: bounds.east, north: bounds.north });
+  }
+  if (bounds.south < overlap.south) {
+    missingBounds.push({ west: overlap.west, south: bounds.south, east: overlap.east, north: overlap.south });
+  }
+  if (overlap.north < bounds.north) {
+    missingBounds.push({ west: overlap.west, south: overlap.north, east: overlap.east, north: bounds.north });
+  }
+
+  return missingBounds.filter(isValidBounds);
+}
+
+function missingBoundsForViewport(viewportBounds, loadedBoundsList) {
+  return loadedBoundsList.reduce(
+    (missingBounds, loadedBounds) => missingBounds.flatMap((bounds) => subtractBounds(bounds, loadedBounds)),
+    [viewportBounds]
+  );
+}
+
+function rememberTileLoadedBounds(loadedBoundsList, bounds) {
+  return [...loadedBoundsList, bounds].slice(-MAX_GEOJSON_TILE_LOADED_AREAS);
+}
+
+function tileViewportRequest(map) {
+  const rawZoom = map.getZoom();
+  const zoom = Number(rawZoom.toFixed(1));
+
+  if (zoom < MIN_GEOJSON_TILE_ZOOM) {
+    return {
+      shouldLoad: false,
+      key: `below:${zoom}`
+    };
+  }
+
+  const bounds = map.getBounds();
+  const cacheZoom = snapNumber(rawZoom, GEOJSON_TILE_CACHE_ZOOM_STEP, 1);
+  const viewportBounds = snapBoundsOut({
+    west: bounds.getWest(),
+    south: bounds.getSouth(),
+    east: bounds.getEast(),
+    north: bounds.getNorth()
+  }, GEOJSON_TILE_CACHE_BOUNDS_STEP_DEGREES);
+  const key = [cacheZoom.toFixed(1), boundsKey(viewportBounds)].join(':');
+
+  return {
+    shouldLoad: true,
+    key,
+    bounds: viewportBounds
+  };
+}
+
+function readTileCache(cache, key) {
+  if (!cache.has(key)) return null;
+
+  const features = cache.get(key);
+  cache.delete(key);
+  cache.set(key, features);
+  return features;
+}
+
+function writeTileCache(cache, key, features) {
+  cache.set(key, features);
+
+  while (cache.size > MAX_GEOJSON_TILE_CACHE_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+    cache.delete(oldestKey);
+  }
+}
+
+function normalizedTileKeyPart(value) {
+  return value === null || value === undefined ? '' : String(value).trim().toLowerCase();
+}
+
+function normalizedTileCoordinate(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(6) : '';
+}
+
+function tileFeatureKey(feature) {
+  const properties = feature?.properties || {};
+  const coordinates = feature?.geometry?.coordinates || [];
+  const stableParts = [
+    properties.kommunenummer,
+    properties.gard,
+    properties.bruksnummer,
+    properties.feste,
+    properties.andel,
+    properties.seksjon,
+    properties.bruksenhetsNr || properties.brukenhetsnummer,
+    properties.adresse,
+    normalizedTileCoordinate(coordinates[0]),
+    normalizedTileCoordinate(coordinates[1])
+  ].map(normalizedTileKeyPart);
+
+  if (stableParts.some(Boolean)) {
+    return stableParts.join('|');
+  }
+
+  return normalizedTileKeyPart(feature?.id || properties.id);
+}
+
+function mergeUniqueTileFeatures(existingFeatures, nextFeatures) {
+  const seenKeys = new Set(existingFeatures.map(tileFeatureKey));
+  const mergedFeatures = [...existingFeatures];
+
+  nextFeatures.forEach((feature) => {
+    const key = tileFeatureKey(feature);
+    if (seenKeys.has(key)) return;
+
+    seenKeys.add(key);
+    mergedFeatures.push(feature);
+  });
+
+  return mergedFeatures;
+}
+
 function syncMapDataAndVisibility(map, {
   featureCollection,
   heatmapCollection,
@@ -706,6 +873,7 @@ function syncMapDataAndVisibility(map, {
   const heatmapVisibility = viewMode === 'heatmap' ? 'visible' : 'none';
   const tileVisibility = viewMode === 'tiles' ? 'visible' : 'none';
   const upgradeVisibility = viewMode === 'upgrade' ? 'visible' : 'none';
+  const nearbyCircleVisibility = viewMode === 'tiles' ? 'none' : 'visible';
 
   setLayerVisibility(map, LAYER_IDS.clusters, markerVisibility);
   setLayerVisibility(map, LAYER_IDS.clusterCount, markerVisibility);
@@ -715,6 +883,7 @@ function syncMapDataAndVisibility(map, {
   setLayerVisibility(map, LAYER_IDS.heatmapPoints, heatmapVisibility);
   setLayerVisibility(map, LAYER_IDS.upgradePriorityPoints, upgradeVisibility);
   setLayerVisibility(map, LAYER_IDS.energyTilePoints, tileVisibility);
+  setLayerVisibility(map, LAYER_IDS.nearbyCircle, nearbyCircleVisibility);
 }
 
 function addSourceIfMissing(map, sourceId, source) {
@@ -729,7 +898,80 @@ function addLayerIfMissing(map, layer) {
   }
 }
 
+const MAP_PIN_IMAGES = [
+  ['map-pin-marker', '#1a73e8'],
+  ['map-pin-upgrade-low', '#22c55e'],
+  ['map-pin-upgrade-mid', '#facc15'],
+  ['map-pin-upgrade-high', '#f97316'],
+  ['map-pin-upgrade-critical', '#dc2626'],
+  ['map-pin-selected', '#fbbc04'],
+  ['map-pin-nearby', '#ea4335'],
+  ['energy-pin-a', '#15803d'],
+  ['energy-pin-b', '#22c55e'],
+  ['energy-pin-c', '#84cc16'],
+  ['energy-pin-d', '#facc15'],
+  ['energy-pin-e', '#f97316'],
+  ['energy-pin-f', '#dc2626'],
+  ['energy-pin-g', '#991b1b'],
+  ['energy-pin-default', '#64748b']
+];
+
+function createEnergyPinImage(color) {
+  const pixelRatio = 2;
+  const width = 56;
+  const height = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = width * pixelRatio;
+  canvas.height = height * pixelRatio;
+  const context = canvas.getContext('2d');
+
+  context.scale(pixelRatio, pixelRatio);
+  context.clearRect(0, 0, width, height);
+
+  context.save();
+  context.translate(width / 2, 56);
+  context.scale(1, 0.32);
+  context.beginPath();
+  context.arc(0, 0, 12, 0, Math.PI * 2);
+  context.fillStyle = 'rgba(0, 0, 0, 0.22)';
+  context.fill();
+  context.restore();
+
+  context.save();
+  context.translate(width / 2, 26);
+  context.rotate(Math.PI / 4);
+  context.beginPath();
+  context.moveTo(-4, -18);
+  context.quadraticCurveTo(18, -18, 18, 4);
+  context.lineTo(18, 18);
+  context.lineTo(4, 18);
+  context.quadraticCurveTo(-18, 18, -18, -4);
+  context.quadraticCurveTo(-18, -18, -4, -18);
+  context.closePath();
+  context.lineWidth = 11;
+  context.lineJoin = 'round';
+  context.strokeStyle = color;
+  context.stroke();
+  context.restore();
+
+  return {
+    image: context.getImageData(0, 0, canvas.width, canvas.height),
+    pixelRatio
+  };
+}
+
+function addMapImages(map) {
+  MAP_PIN_IMAGES.forEach(([id, color]) => {
+    if (map.hasImage?.(id)) return;
+
+    const { image, pixelRatio } = createEnergyPinImage(color);
+    map.addImage(id, image, { pixelRatio });
+  });
+}
+
 function addMapLayers(map) {
+  addMapImages(map);
+
   addSourceIfMissing(map, SOURCE_IDS.buildings, {
     type: 'geojson',
     data: buildFeatureCollection([]),
@@ -749,10 +991,8 @@ function addMapLayers(map) {
   });
 
   addSourceIfMissing(map, SOURCE_IDS.energyTiles, {
-    type: 'vector',
-    tiles: [ENERGY_TILE_URL],
-    minzoom: 10,
-    maxzoom: 18
+    type: 'geojson',
+    data: buildFeatureCollection([])
   });
 
   addLayerIfMissing(map, {
@@ -786,15 +1026,16 @@ function addMapLayers(map) {
 
   addLayerIfMissing(map, {
     id: LAYER_IDS.points,
-    type: 'circle',
+    type: 'symbol',
     source: SOURCE_IDS.buildings,
     filter: ['!', ['has', 'point_count']],
-    paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 5, 12, 9],
-      'circle-color': '#1a73e8',
-      'circle-stroke-color': '#ffffff',
-      'circle-stroke-width': 1.5,
-      'circle-opacity': 0.9
+    layout: {
+      'icon-image': 'map-pin-marker',
+      'icon-size': ['interpolate', ['linear'], ['zoom'], 5, 0.42, 12, 0.62, 16, 0.76],
+      'icon-anchor': 'bottom',
+      'icon-offset': [0, 3],
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true
     }
   });
 
@@ -863,98 +1104,102 @@ function addMapLayers(map) {
 
   addLayerIfMissing(map, {
     id: LAYER_IDS.upgradePriorityPoints,
-    type: 'circle',
+    type: 'symbol',
     source: SOURCE_IDS.upgradeBuildings,
-    layout: { visibility: 'none' },
-    paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 4, 12, 8, 16, 10],
-      'circle-color': [
-        'interpolate',
-        ['linear'],
+    layout: {
+      visibility: 'none',
+      'icon-image': [
+        'step',
         ['coalesce', ['get', 'upgradeScore'], 0],
-        0,
-        '#22c55e',
+        'map-pin-upgrade-low',
         45,
-        '#facc15',
+        'map-pin-upgrade-mid',
         75,
-        '#f97316',
+        'map-pin-upgrade-high',
         100,
-        '#dc2626'
+        'map-pin-upgrade-critical'
       ],
-      'circle-opacity': 0.9,
-      'circle-stroke-color': '#ffffff',
-      'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 5, 0.8, 14, 1.6]
+      'icon-size': ['interpolate', ['linear'], ['zoom'], 5, 0.38, 12, 0.58, 16, 0.74],
+      'icon-anchor': 'bottom',
+      'icon-offset': [0, 3],
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true
     }
   });
 
   addLayerIfMissing(map, {
     id: LAYER_IDS.energyTilePoints,
-    type: 'circle',
+    type: 'symbol',
     source: SOURCE_IDS.energyTiles,
-    'source-layer': ENERGY_TILE_SOURCE_LAYER,
-    minzoom: 10,
-    layout: { visibility: 'none' },
-    paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 3, 14, 5.5, 18, 8],
-      'circle-color': [
+    layout: {
+      visibility: 'none',
+      'icon-image': [
         'match',
         ['get', 'energikarakter'],
         'A',
-        '#15803d',
+        'energy-pin-a',
         'B',
-        '#22c55e',
+        'energy-pin-b',
         'C',
-        '#84cc16',
+        'energy-pin-c',
         'D',
-        '#facc15',
+        'energy-pin-d',
         'E',
-        '#f97316',
+        'energy-pin-e',
         'F',
-        '#dc2626',
+        'energy-pin-f',
         'G',
-        '#991b1b',
-        '#64748b'
+        'energy-pin-g',
+        'energy-pin-default'
       ],
-      'circle-opacity': 0.86,
-      'circle-stroke-color': '#ffffff',
-      'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 10, 0.7, 16, 1.4]
+      'icon-size': ['interpolate', ['linear'], ['zoom'], 10, 0.42, 14, 0.58, 18, 0.76],
+      'icon-anchor': 'bottom',
+      'icon-offset': [0, 3],
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true
     }
   });
 
   addSourceIfMissing(map, SOURCE_IDS.selected, { type: 'geojson', data: buildFeatureCollection([]) });
   addLayerIfMissing(map, {
     id: LAYER_IDS.selectedHalo,
-    type: 'circle',
+    type: 'symbol',
     source: SOURCE_IDS.selected,
-    paint: {
-      'circle-radius': 18,
-      'circle-color': 'rgba(251, 188, 4, 0.2)',
-      'circle-stroke-color': '#fbbc04',
-      'circle-stroke-width': 3
+    layout: {
+      'icon-image': 'map-pin-selected',
+      'icon-size': ['interpolate', ['linear'], ['zoom'], 5, 0.72, 14, 0.92, 18, 1.05],
+      'icon-anchor': 'bottom',
+      'icon-offset': [0, 3],
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true
     }
   });
   addLayerIfMissing(map, {
     id: LAYER_IDS.selectedPoint,
-    type: 'circle',
+    type: 'symbol',
     source: SOURCE_IDS.selected,
-    paint: {
-      'circle-radius': 7,
-      'circle-color': '#fbbc04',
-      'circle-stroke-color': '#202124',
-      'circle-stroke-width': 2
+    layout: {
+      'icon-image': 'map-pin-selected',
+      'icon-size': ['interpolate', ['linear'], ['zoom'], 5, 0.5, 14, 0.68, 18, 0.82],
+      'icon-anchor': 'bottom',
+      'icon-offset': [0, 3],
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true
     }
   });
 
   addSourceIfMissing(map, SOURCE_IDS.nearby, { type: 'geojson', data: buildFeatureCollection([]) });
   addLayerIfMissing(map, {
     id: LAYER_IDS.nearby,
-    type: 'circle',
+    type: 'symbol',
     source: SOURCE_IDS.nearby,
-    paint: {
-      'circle-radius': 6,
-      'circle-color': '#ea4335',
-      'circle-stroke-color': '#ffffff',
-      'circle-stroke-width': 2
+    layout: {
+      'icon-image': 'map-pin-nearby',
+      'icon-size': ['interpolate', ['linear'], ['zoom'], 5, 0.42, 12, 0.58, 16, 0.72],
+      'icon-anchor': 'bottom',
+      'icon-offset': [0, 3],
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true
     }
   });
 
@@ -976,6 +1221,11 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
   const mapRef = useRef(null);
   const popupRef = useRef(null);
   const featuresRef = useRef(features);
+  const tileLoadControllerRef = useRef(null);
+  const tileViewportTimerRef = useRef(null);
+  const tileRequestKeyRef = useRef('');
+  const tileCacheRef = useRef(new Map());
+  const tileLoadedBoundsRef = useRef([]);
   const allFeatures = useStore((state) => state.allFeatures);
   const allFeaturesRef = useRef(allFeatures);
   const mapClickRef = useRef(onMapClick);
@@ -989,6 +1239,11 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
   const featureCollection = useMemo(() => buildFeatureCollection(features), [features]);
   const heatmapData = useMemo(() => buildHeatmapData(features), [features]);
   const nearbyCollection = useMemo(() => buildNearbyGeoJson(nearbyState.results), [nearbyState.results]);
+  const [tileFeatures, setTileFeatures] = useState([]);
+  const [isLoadingTiles, setIsLoadingTiles] = useState(false);
+  const [tileLoadTarget, setTileLoadTarget] = useState(null);
+  const [tileMessage, setTileMessage] = useState('');
+  const tileCollection = useMemo(() => buildFeatureCollection(tileFeatures), [tileFeatures]);
   const nearbyCircleCollection = useMemo(() => {
     if (!nearbyState.center) return buildFeatureCollection([]);
     return buildNearbyCircleGeoJson(
@@ -1000,6 +1255,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
   const featureCollectionRef = useRef(featureCollection);
   const heatmapCollectionRef = useRef(heatmapData.collection);
   const heatmapStatsRef = useRef(heatmapData.stats);
+  const tileCollectionRef = useRef(tileCollection);
   const nearbyCollectionRef = useRef(nearbyCollection);
   const nearbyCircleCollectionRef = useRef(nearbyCircleCollection);
   const selectedFeatureRef = useRef(selectedFeature);
@@ -1025,6 +1281,10 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
     heatmapCollectionRef.current = heatmapData.collection;
     heatmapStatsRef.current = heatmapData.stats;
   }, [heatmapData]);
+
+  useEffect(() => {
+    tileCollectionRef.current = tileCollection;
+  }, [tileCollection]);
 
   useEffect(() => {
     nearbyCollectionRef.current = nearbyCollection;
@@ -1061,6 +1321,144 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
     selectedBydelRef.current = selectedBydel;
   }, [selectedBydel]);
 
+  const loadTilesForCurrentViewport = useCallback(async (map) => {
+    if (!map || viewModeRef.current !== 'tiles') return;
+
+    const request = tileViewportRequest(map);
+
+    if (!request.shouldLoad) {
+      tileRequestKeyRef.current = request.key;
+      tileLoadControllerRef.current?.abort();
+      tileLoadedBoundsRef.current = [];
+      setTileFeatures([]);
+      setTileMessage(`Zoom to ${MIN_GEOJSON_TILE_ZOOM}+ to load tile points.`);
+      setIsLoadingTiles(false);
+      setTileLoadTarget(null);
+      return;
+    }
+
+    const missingBounds = missingBoundsForViewport(request.bounds, tileLoadedBoundsRef.current);
+    const missingRequestKey = missingBounds.map(boundsKey).join('|');
+
+    if (missingBounds.length === 0) {
+      tileRequestKeyRef.current = request.key;
+      setIsLoadingTiles(false);
+      setTileLoadTarget(null);
+      setTileMessage('');
+      return;
+    }
+
+    if (missingRequestKey === tileRequestKeyRef.current) return;
+
+    tileRequestKeyRef.current = missingRequestKey;
+    tileLoadControllerRef.current?.abort();
+
+    const controller = new AbortController();
+    tileLoadControllerRef.current = controller;
+    setIsLoadingTiles(true);
+    setTileLoadTarget(GEOJSON_TILE_LOAD_STEPS[0]);
+    setTileMessage('');
+
+    let latestFeatures = tileCollectionRef.current?.features || [];
+    let loadedAnyFeatures = latestFeatures.length > 0;
+
+    try {
+      for (const bounds of missingBounds) {
+        const boundsCacheKey = boundsKey(bounds);
+        const cachedFeatures = readTileCache(tileCacheRef.current, boundsCacheKey);
+
+        if (cachedFeatures) {
+          latestFeatures = mergeUniqueTileFeatures(latestFeatures, cachedFeatures);
+          loadedAnyFeatures = latestFeatures.length > 0;
+          tileLoadedBoundsRef.current = rememberTileLoadedBounds(tileLoadedBoundsRef.current, bounds);
+          setTileFeatures(latestFeatures);
+          continue;
+        }
+
+        let loadedBoundsFeatures = [];
+
+        for (let index = 0; index < GEOJSON_TILE_LOAD_STEPS.length; index += 1) {
+          const targetAmount = GEOJSON_TILE_LOAD_STEPS[index];
+          const previousTargetAmount = index === 0 ? 0 : GEOJSON_TILE_LOAD_STEPS[index - 1];
+          const amount = targetAmount - previousTargetAmount;
+          const skip = previousTargetAmount;
+          const nextTargetAmount = GEOJSON_TILE_LOAD_STEPS[index + 1];
+          setTileLoadTarget(targetAmount);
+
+          const payload = await fetchBuildingsBoundsGeoJson({
+            minLatitude: bounds.south,
+            minLongitude: bounds.west,
+            maxLatitude: bounds.north,
+            maxLongitude: bounds.east,
+            amount,
+            skip
+          }, {
+            signal: controller.signal
+          });
+
+          if (
+            controller.signal.aborted ||
+            tileLoadControllerRef.current !== controller ||
+            tileRequestKeyRef.current !== missingRequestKey ||
+            viewModeRef.current !== 'tiles'
+          ) {
+            return;
+          }
+
+          const normalized = normalizeGeoJson(payload);
+          const nextFeatures = normalized.features;
+
+          if (nextFeatures.length === 0) {
+            break;
+          }
+
+          loadedBoundsFeatures = mergeUniqueTileFeatures(loadedBoundsFeatures, nextFeatures);
+          latestFeatures = mergeUniqueTileFeatures(latestFeatures, nextFeatures);
+          loadedAnyFeatures = latestFeatures.length > 0;
+          setTileFeatures(latestFeatures);
+
+          setTileMessage(
+            nextTargetAmount
+              ? `Loaded ${latestFeatures.length.toLocaleString()} tile points. Loading empty viewport area up to ${nextTargetAmount.toLocaleString()}...`
+              : ''
+          );
+        }
+
+        writeTileCache(tileCacheRef.current, boundsCacheKey, loadedBoundsFeatures);
+        tileLoadedBoundsRef.current = rememberTileLoadedBounds(tileLoadedBoundsRef.current, bounds);
+      }
+
+      setTileMessage(loadedAnyFeatures ? '' : 'No tile points in this map area.');
+    } catch (error) {
+      if (error?.name === 'AbortError') return;
+      if (loadedAnyFeatures) {
+        setTileMessage(`Loaded ${latestFeatures.length.toLocaleString()} tile points. More empty area failed to load.`);
+      } else {
+        setTileMessage(error?.message || 'Failed to load tile points.');
+      }
+    } finally {
+      if (tileLoadControllerRef.current === controller) {
+        tileLoadControllerRef.current = null;
+        tileRequestKeyRef.current = '';
+        setIsLoadingTiles(false);
+        setTileLoadTarget(null);
+      }
+    }
+  }, []);
+
+  const scheduleTilesForCurrentViewport = useCallback((map) => {
+    if (!map || viewModeRef.current !== 'tiles') return;
+
+    if (tileViewportTimerRef.current) {
+      window.clearTimeout(tileViewportTimerRef.current);
+    }
+
+    tileViewportTimerRef.current = window.setTimeout(() => {
+      tileViewportTimerRef.current = null;
+      loadTilesForCurrentViewport(map);
+    }, GEOJSON_TILE_MOVE_DEBOUNCE_MS);
+  }, [loadTilesForCurrentViewport]);
+
   useEffect(() => {
     if (mapRef.current || !mapContainerRef.current) return undefined;
 
@@ -1079,7 +1477,12 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
       setZoomLevel(Number(map.getZoom().toFixed(1)));
     };
 
+    const handleTileViewportMoveEnd = () => {
+      scheduleTilesForCurrentViewport(map);
+    };
+
     map.on('zoom', updateZoomLevel);
+    map.on('moveend', handleTileViewportMoveEnd);
 
     map.on('load', () => {
       addMapLayers(map);
@@ -1092,6 +1495,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
         selectedFeature: selectedFeatureRef.current,
         viewMode: viewModeRef.current
       });
+      map.getSource(SOURCE_IDS.energyTiles)?.setData(tileCollectionRef.current);
 
       map.on('click', LAYER_IDS.clusters, (event) => {
         const clusterFeature = map.queryRenderedFeatures(event.point, { layers: [LAYER_IDS.clusters] })[0];
@@ -1163,12 +1567,11 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
         const feature = event.features?.[0];
         if (!feature) return;
 
-        const properties = tilePropertiesToPopupProperties(feature.properties);
         popupRef.current?.remove();
         popupRef.current = openPopup(
           map,
-          event.lngLat.toArray(),
-          popupHtml(properties)
+          feature.geometry.coordinates.slice(),
+          tilePopupHtml(feature.properties)
         );
       });
 
@@ -1294,12 +1697,18 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
     mapRef.current = map;
     return () => {
       popupRef.current?.remove();
+      if (tileViewportTimerRef.current) {
+        window.clearTimeout(tileViewportTimerRef.current);
+        tileViewportTimerRef.current = null;
+      }
+      tileLoadControllerRef.current?.abort();
       mapRef.current?._cleanup?.();
       map.off('zoom', updateZoomLevel);
+      map.off('moveend', handleTileViewportMoveEnd);
       map.remove();
       mapRef.current = null;
     };
-  }, [setSelectedFeature]);
+  }, [scheduleTilesForCurrentViewport, setSelectedFeature]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1327,6 +1736,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
           selectedFeature: selectedFeatureRef.current,
           viewMode: viewModeRef.current
         });
+        map.getSource(SOURCE_IDS.energyTiles)?.setData(tileCollectionRef.current);
       };
 
       restoreMapOverlays();
@@ -1352,6 +1762,28 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
       viewMode
     });
   }, [featureCollection, heatmapData, nearbyCollection, nearbyCircleCollection, selectedFeature, viewMode]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map?.isStyleLoaded()) return;
+    map.getSource(SOURCE_IDS.energyTiles)?.setData(tileCollection);
+  }, [tileCollection]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map?.isStyleLoaded()) return;
+    if (viewMode === 'tiles') {
+      loadTilesForCurrentViewport(map);
+    } else {
+      if (tileViewportTimerRef.current) {
+        window.clearTimeout(tileViewportTimerRef.current);
+        tileViewportTimerRef.current = null;
+      }
+      tileLoadControllerRef.current?.abort();
+      setIsLoadingTiles(false);
+      setTileLoadTarget(null);
+    }
+  }, [loadTilesForCurrentViewport, viewMode]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1447,9 +1879,6 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
       <CollapsedModeDock />
       <div className="zoom-readout">
         Zoom {zoomLevel.toFixed(1)}
-        {viewMode === 'tiles' && zoomLevel < 10 && (
-          <span>Tiles appear at 10+</span>
-        )}
       </div>
       <div className="map-floating">
         <MapLegend heatmapStats={heatmapData.stats} />
@@ -1461,6 +1890,23 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
         {isSearchingNearby && (
           <div className="map-pill">
             Finding nearby buildings within {radiusInMeters.toLocaleString()} m...
+          </div>
+        )}
+        {viewMode === 'tiles' && isLoadingTiles && (
+          <div className="map-pill">
+            {tileFeatures.length > 0
+              ? `Loading up to ${(tileLoadTarget ?? MAX_GEOJSON_TILE_FEATURES).toLocaleString()} tile points...`
+              : `Loading first ${(tileLoadTarget ?? GEOJSON_TILE_LOAD_STEPS[0]).toLocaleString()} tile points...`}
+          </div>
+        )}
+        {viewMode === 'tiles' && tileMessage && (
+          <div className="map-pill">
+            {tileMessage}
+          </div>
+        )}
+        {viewMode === 'tiles' && tileFeatures.length > 0 && (
+          <div className="map-pill">
+            <strong>{tileFeatures.length}</strong> tile points loaded
           </div>
         )}
         {nearbyState.results.length > 0 && (

@@ -113,7 +113,6 @@ namespace WebApi.Controllers
             {
                 return BadRequest("Radius må være mellom 1 og 50 000 meter.");
             }
-
             try
             {
                 /*var factory = NtsGeometryServices.Instance.CreateGeometryFactory(srid: 4258);
@@ -268,16 +267,71 @@ namespace WebApi.Controllers
             double longitude = 10.8,
             double radiusInMeters = 2500,
             int amount = 10,
-            bool onlyNew = false
+            bool onlyNew = false,
+            int skip = 0
         )
         {
             if (radiusInMeters <= 0 || radiusInMeters > 50000)
             {
                 return BadRequest("Radius må være mellom 1 og 50 000 meter.");
             }
+            if (amount <= 0)
+            {
+                return BadRequest("Amount must be greater than 0.");
+            }
+            if (skip < 0)
+            {
+                return BadRequest("Skip cannot be negative.");
+            }
             try
             {
-                var sumStuff = await _service.GetNearbyDeNormGeoJson(latitude, longitude, amount, radiusInMeters,onlyNew);
+                var sumStuff = await _service.GetNearbyDeNormGeoJson(latitude, longitude, amount, radiusInMeters, onlyNew, skip);
+
+                return Ok(sumStuff);
+            } catch (Exception ex)
+            {
+                return StatusCode(500, $"Feil: {ex.Message}");
+            }
+        }
+
+        [HttpGet("GetBoundsDeNormGeoJson")]
+        public async Task<IActionResult> GetBoundsDeNormGeoJson(
+            double minLatitude,
+            double minLongitude,
+            double maxLatitude,
+            double maxLongitude,
+            int amount = 10,
+            bool onlyNew = false,
+            int skip = 0
+        )
+        {
+            if (minLatitude < -90 || minLatitude > 90 || maxLatitude < -90 || maxLatitude > 90)
+            {
+                return BadRequest("Latitude must be between -90 and 90.");
+            }
+            if (minLongitude < -180 || minLongitude > 180 || maxLongitude < -180 || maxLongitude > 180)
+            {
+                return BadRequest("Longitude must be between -180 and 180.");
+            }
+            if (amount <= 0)
+            {
+                return BadRequest("Amount must be greater than 0.");
+            }
+            if (skip < 0)
+            {
+                return BadRequest("Skip cannot be negative.");
+            }
+
+            try
+            {
+                var sumStuff = await _service.GetBoundsDeNormGeoJson(
+                    minLatitude,
+                    minLongitude,
+                    maxLatitude,
+                    maxLongitude,
+                    amount,
+                    onlyNew,
+                    skip);
 
                 return Ok(sumStuff);
             } catch (Exception ex)
