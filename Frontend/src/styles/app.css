@@ -63,17 +63,40 @@
   display: flex;
   align-items: center;
   gap: 14px;
+  max-width: min(92vw, 28rem);
   border-radius: 8px;
   padding: 18px 22px;
+  animation: statusIn 180ms ease both;
 }
 
 .spinner {
-  width: 22px;
-  height: 22px;
-  border: 3px solid rgba(15, 157, 138, 0.22);
-  border-top-color: var(--accent);
+  position: relative;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border: 0;
+  animation: none;
+}
+
+.spinner::before,
+.spinner::after {
+  position: absolute;
+  inset: 0;
   border-radius: 50%;
+  content: "";
+}
+
+.spinner::before {
+  border: 3px solid rgba(26, 115, 232, 0.18);
+  border-top-color: var(--accent);
   animation: spin 0.9s linear infinite;
+}
+
+.spinner::after {
+  inset: 10px;
+  background: #cf7a62;
+  box-shadow: 0 0 0 5px rgba(207, 122, 98, 0.12);
+  animation: loaderPulse 0.9s ease-in-out infinite alternate;
 }
 
 .status-title,
@@ -98,11 +121,25 @@
   transform: translateX(-50%);
   border-radius: 8px;
   padding: 18px 22px;
+  overflow: hidden;
+  animation: toastIn 180ms ease both;
+}
+
+.toast::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--accent);
+  content: "";
 }
 
 .toast-error {
   background: var(--danger-bg);
   color: var(--danger-text);
+}
+
+.toast-error::before {
+  background: #b3261e;
 }
 
 .toast-empty {
@@ -112,6 +149,42 @@
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes loaderPulse {
+  from {
+    opacity: 0.72;
+    transform: scale(0.78);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes statusIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
   }
 }
 

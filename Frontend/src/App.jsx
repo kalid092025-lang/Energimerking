@@ -264,8 +264,8 @@ function App() {
           />
           {isLoading && (
               <div className="status-overlay">
-                <div className="status-card">
-                  <div className="spinner" />
+                <div className="status-card" role="status" aria-live="polite">
+                  <div className="spinner" aria-hidden="true" />
                   <div>
                     <div className="status-title">Loading building data</div>
                     <div className="status-copy">Preparing map, layers, and filters.</div>
@@ -274,13 +274,13 @@ function App() {
               </div>
             )}
           {error && !isLoading && (
-              <div className="toast toast-error">
+              <div className="toast toast-error" role="alert">
                 <div className="toast-title">Something went wrong</div>
                 <div className="toast-copy">{error}</div>
               </div>
             )}
           {isEmpty && (
-              <div className="toast toast-empty">
+              <div className="toast toast-empty" role="status">
                 <div className="toast-title">{emptyTitle}</div>
                 <div className="toast-copy">{emptyCopy}</div>
               </div>

@@ -26,48 +26,58 @@ function Sidebar({ isSearchingNearby }) {
           <div className="sidebar-controls" aria-label="Map tools">
             <button
               type="button"
-              className={`tool-button icon-tool ${sidebarOpen ? "active" : ""}`}
+              className={`tool-button icon-tool panel-tool ${sidebarOpen ? "active" : ""}`}
               onClick={toggleSidebar}
               aria-pressed={sidebarOpen}
+              aria-label="Toggle filters"
             >
-              <SlidersHorizontal
-                className="tool-icon"
-                aria-hidden="true"
-                strokeWidth={2.2}
-              />
+              <span className="tool-glyph" aria-hidden="true">
+                <SlidersHorizontal
+                  className="tool-icon"
+                  strokeWidth={2.2}
+                />
+              </span>
               <span className="sr-only">Filters</span>
             </button>
             <button
               type="button"
-              className={`tool-button ${nearbySearchEnabled ? "active" : ""}`}
+              className={`tool-button radius-tool ${nearbySearchEnabled ? "active" : ""}`}
               onClick={toggleNearbySearch}
               aria-pressed={nearbySearchEnabled}
               aria-label="Toggle radius search. When enabled, click the map to search for buildings inside the selected radius."
               title="Toggle radius search. When enabled, click the map to search for buildings inside the selected radius."
             >
-              <span>
-                <CircleDot
-                  className="tool-inline-icon"
-                  aria-hidden="true"
-                  strokeWidth={2.2}
-                />{" "}
-                Radius{" "}
-                <span className="tool-help" aria-hidden="true">
-                  ?
+              <span className="tool-copy">
+                <span className="tool-label">
+                  <CircleDot
+                    className="tool-inline-icon"
+                    aria-hidden="true"
+                    strokeWidth={2.2}
+                  />
+                  Radius
+                </span>
+                <span className="radius-switch-row" aria-hidden="true">
+                  <span className="radius-switch-track">
+                    <span className="radius-switch-thumb" />
+                  </span>
+                  <strong className="tool-state">
+                    {nearbySearchEnabled ? "On" : "Off"}
+                  </strong>
                 </span>
               </span>
-              <strong>{nearbySearchEnabled ? "On" : "Off"}</strong>
             </button>
             <button
               type="button"
-              className="tool-button icon-tool"
+              className="tool-button icon-tool theme-tool"
               onClick={toggleTheme}
+              aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
             >
-              <ThemeIcon
-                className="tool-icon"
-                aria-hidden="true"
-                strokeWidth={2.2}
-              />
+              <span className="tool-glyph" aria-hidden="true">
+                <ThemeIcon
+                  className="tool-icon"
+                  strokeWidth={2.2}
+                />
+              </span>
               <span className="sr-only">
                 {theme === "dark" ? "Dark mode" : "Light mode"}
               </span>

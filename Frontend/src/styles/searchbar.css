@@ -56,6 +56,34 @@
   padding: 0 12px;
   height: 42px;
   border-radius: 999px;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease, background 160ms ease;
+}
+
+.search-shell:focus-within {
+  border-color: rgba(26, 115, 232, 0.44);
+  box-shadow: 0 2px 6px rgba(60, 64, 67, 0.16), 0 8px 24px rgba(26, 115, 232, 0.12);
+  transform: translateY(-1px);
+}
+
+.theme-dark .search-shell:focus-within {
+  border-color: rgba(138, 180, 248, 0.46);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.32), 0 8px 24px rgba(138, 180, 248, 0.1);
+}
+
+.search-shell.is-disabled {
+  opacity: 0.72;
+}
+
+.search-input-icon {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  color: #77728c;
+  transition: color 160ms ease;
+}
+
+.search-shell:focus-within .search-input-icon {
+  color: var(--accent);
 }
 
 .search-shell input {
@@ -77,14 +105,33 @@
 }
 
 .inline-ghost {
+  display: inline-grid;
+  place-items: center;
   border: 0;
   min-height: 28px;
+  min-width: 28px;
   padding: 5px 8px;
   border-radius: 6px;
   background: #f1f3f4;
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 700;
+  transition: background 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.inline-ghost:hover,
+.inline-ghost:focus-visible {
+  background: #e8f0fe;
+  color: var(--accent);
+}
+
+.inline-ghost:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+.inline-ghost svg {
+  width: 15px;
+  height: 15px;
 }
 
 .theme-dark .inline-ghost {
@@ -94,8 +141,10 @@
 .suggestions-panel {
   position: absolute;
   inset: calc(100% + 8px) 0 auto 0;
+  z-index: 42;
   padding: 8px;
   border-radius: 18px;
+  animation: suggestionsIn 160ms ease both;
 }
 
 .suggestion-item {
@@ -109,13 +158,20 @@
   background: transparent;
   color: var(--text);
   text-align: left;
+  cursor: pointer;
+  transition: background 150ms ease, box-shadow 150ms ease, transform 150ms ease;
 }
 
-.suggestion-item:hover {
+.suggestion-item:hover,
+.suggestion-item:focus-visible {
   background: #f1f3f4;
+  box-shadow: inset 3px 0 0 rgba(26, 115, 232, 0.36);
+  outline: 0;
+  transform: translateX(2px);
 }
 
-.theme-dark .suggestion-item:hover {
+.theme-dark .suggestion-item:hover,
+.theme-dark .suggestion-item:focus-visible {
   background: rgba(255, 255, 255, 0.05);
 }
 
@@ -148,6 +204,18 @@
 
 .suggestions-empty {
   padding: 14px;
+}
+
+@keyframes suggestionsIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @media (max-width: 900px) {

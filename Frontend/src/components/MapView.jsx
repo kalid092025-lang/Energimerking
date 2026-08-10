@@ -12,6 +12,7 @@ import {
   DEFAULT_ZOOM,
   LAYER_IDS,
   LIGHT_MAP_STYLE_URL,
+  MAP_VIEW_MODES,
   SOURCE_IDS
 } from '../utils/constants.js';
 import '../styles/map-view.css';
@@ -90,6 +91,27 @@ function popupMetric(label, value, modifier = '', tooltip = '') {
   `;
 }
 
+function markerPopupMetric(label, value, tooltip = '') {
+  const valueClass = hasValue(value) ? 'marker-popup-metric-value' : 'marker-popup-metric-value popup-value-empty';
+  return `
+    <div class="marker-popup-metric">
+      <span class="marker-popup-metric-label">${popupLabel(label, tooltip)}</span>
+      <strong class="${valueClass}">${escapeHtml(displayValue(value, 'N/A'))}</strong>
+    </div>
+  `;
+}
+
+function markerPopupDetail(label, value, tooltip = '') {
+  if (!hasValue(value)) return '';
+
+  return `
+    <div class="marker-popup-detail">
+      <span class="marker-popup-detail-label">${popupLabel(label, tooltip)}</span>
+      <strong class="marker-popup-detail-value">${escapeHtml(value)}</strong>
+    </div>
+  `;
+}
+
 function firstPopulated(...values) {
   return values.find((value) => hasValue(value));
 }
@@ -113,38 +135,43 @@ function popupHtml(properties) {
   );
 
   return `
-    <div class="popup-card">
-      <div class="popup-header">
-        <div class="popup-heading">
-          <div class="popup-kicker">Energy certificate</div>
-          <div class="popup-title">${address}</div>
-          ${municipality ? `<div class="popup-subtitle">${municipality}</div>` : ''}
+    <article class="popup-card marker-popup">
+      <div class="marker-popup-header">
+        <div class="marker-popup-heading">
+          <div class="marker-popup-meta">
+            <span class="marker-popup-kicker">Energy certificate</span>
+            ${municipality ? `<span class="marker-popup-place">${municipality}</span>` : ''}
+          </div>
+          <h2 class="marker-popup-title">${address}</h2>
         </div>
-        <div class="energy-badge ${energyGradeClass}">
-          <span>${popupHelp(POPUP_HELP.grade)}</span>
+        <div class="marker-popup-grade ${energyGradeClass}">
+          <span>Grade</span>
           <strong>${energyGradeDisplay}</strong>
         </div>
       </div>
-      <div class="popup-metrics">
-        ${popupMetric('Unit', unitNumber, 'popup-metric-compact', POPUP_HELP.unit)}
-        ${popupMetric('Energy use', energyUse, 'popup-metric-compact', POPUP_HELP.energyUse)}
-        ${popupMetric('Built', properties.byggeaar, 'popup-metric-compact', POPUP_HELP.built)}
+      <div class="marker-popup-snapshot" aria-label="Building summary">
+        ${markerPopupMetric('Unit', unitNumber, POPUP_HELP.unit)}
+        ${markerPopupMetric('Energy use', energyUse, POPUP_HELP.energyUse)}
+        ${markerPopupMetric('Built', properties.byggeaar, POPUP_HELP.built)}
       </div>
-      <div class="popup-details">
-        ${popupDetail('Address', properties.adresse, POPUP_HELP.address)}
-        ${popupDetail('Municipality', properties.kommunenavn, POPUP_HELP.municipality)}
-        ${popupDetail('Gård', properties.gard)}
-        ${popupDetail('Bruk', properties.bruksnummer, POPUP_HELP.bruk)}
-        ${popupDetail('Feste', properties.feste, POPUP_HELP.feste)}
-        ${popupDetail('Andel', properties.andel, POPUP_HELP.andel)}
-        ${popupDetail('Seksjon', properties.seksjon, POPUP_HELP.seksjon)}
-        ${popupDetail('Organisation no.', properties.organisasjonsNr, POPUP_HELP.organisation)}
-        ${popupDetail('Certificate no.', properties.attestnummer, POPUP_HELP.certificate)}
-        ${popupDetail('Issued', properties.utstedelsesdato, POPUP_HELP.issued)}
-        ${popupDetail('Heating grade', properties.oppvarmingskarakter, POPUP_HELP.heatingGrade)}
-        ${popupDetail('Material', properties.materialvalg, POPUP_HELP.material)}
+      <div class="marker-popup-body">
+        <div class="marker-popup-section-title">Certificate details</div>
+        <div class="marker-popup-detail-list">
+          ${markerPopupDetail('Address', properties.adresse, POPUP_HELP.address)}
+          ${markerPopupDetail('Municipality', properties.kommunenavn, POPUP_HELP.municipality)}
+          ${markerPopupDetail('Gnr.', properties.gard)}
+          ${markerPopupDetail('Bnr.', properties.bruksnummer, POPUP_HELP.bruk)}
+          ${markerPopupDetail('Festenr.', properties.feste, POPUP_HELP.feste)}
+          ${markerPopupDetail('Andel', properties.andel, POPUP_HELP.andel)}
+          ${markerPopupDetail('Seksjon', properties.seksjon, POPUP_HELP.seksjon)}
+          ${markerPopupDetail('Organisation no.', properties.organisasjonsNr, POPUP_HELP.organisation)}
+          ${markerPopupDetail('Certificate no.', properties.attestnummer, POPUP_HELP.certificate)}
+          ${markerPopupDetail('Issued', properties.utstedelsesdato, POPUP_HELP.issued)}
+          ${markerPopupDetail('Heating grade', properties.oppvarmingskarakter, POPUP_HELP.heatingGrade)}
+          ${markerPopupDetail('Material', properties.materialvalg, POPUP_HELP.material)}
+        </div>
       </div>
-    </div>
+    </article>
   `;
 }
 
@@ -586,7 +613,7 @@ function MapLegend({ heatmapStats }) {
       ) : (
         viewMode === 'tiles' ? (
           <div className="legend-list">
-            <div className="legend-item"><span className="legend-dot dot-building" />Backend vector tile buildings</div>
+            <div className="legend-item"><span className="legend-dot dot-building" />Tile-mode building points</div>
             <div className="legend-copy">Colored by energy grade from the tile properties.</div>
           </div>
         ) : viewMode === 'upgrade' ? (
@@ -617,12 +644,17 @@ function MapLegend({ heatmapStats }) {
   );
 }
 
-const MODE_DOCK_ITEMS = [
-  { value: 'markers', label: 'Bydeler i Oslo', Icon: MapPin },
-  { value: 'heatmap', label: 'Heatmap', Icon: Flame },
-  { value: 'tiles', label: 'Tiles', Icon: Layers },
-  { value: 'upgrade', label: 'Upgrade priority', Icon: TrendingUp }
-];
+const MODE_ICONS = {
+  markers: MapPin,
+  heatmap: Flame,
+  tiles: Layers,
+  upgrade: TrendingUp
+};
+
+const MODE_DOCK_ITEMS = MAP_VIEW_MODES.map((item) => ({
+  ...item,
+  Icon: MODE_ICONS[item.value]
+}));
 
 function CollapsedModeDock() {
   const sidebarOpen = useStore((state) => state.sidebarOpen);
@@ -640,10 +672,15 @@ function CollapsedModeDock() {
           <button
             key={item.value}
             type="button"
-            className={`collapsed-mode-button ${viewMode === item.value ? 'active' : ''}`}
+            className={[
+              'collapsed-mode-button',
+              viewMode === item.value ? 'active' : '',
+              item.isolated ? 'is-tiles-mode' : ''
+            ].filter(Boolean).join(' ')}
             onClick={() => setViewMode(item.value)}
             aria-label={item.label}
             aria-pressed={viewMode === item.value}
+            data-mode={item.value}
             title={item.label}
           >
             <Icon className="mode-icon" aria-hidden="true" strokeWidth={2.2} />
@@ -666,7 +703,6 @@ function setLayerVisibility(map, layerId, visibility) {
 
 const MIN_GEOJSON_TILE_ZOOM = 12;
 const GEOJSON_TILE_LOAD_STEPS = [5000, 10000, 50000];
-const MAX_GEOJSON_TILE_FEATURES = GEOJSON_TILE_LOAD_STEPS[GEOJSON_TILE_LOAD_STEPS.length - 1];
 const MAX_GEOJSON_TILE_CACHE_ENTRIES = 24;
 const MAX_GEOJSON_TILE_LOADED_AREAS = 48;
 const GEOJSON_TILE_MOVE_DEBOUNCE_MS = 700;
@@ -1240,9 +1276,6 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
   const heatmapData = useMemo(() => buildHeatmapData(features), [features]);
   const nearbyCollection = useMemo(() => buildNearbyGeoJson(nearbyState.results), [nearbyState.results]);
   const [tileFeatures, setTileFeatures] = useState([]);
-  const [isLoadingTiles, setIsLoadingTiles] = useState(false);
-  const [tileLoadTarget, setTileLoadTarget] = useState(null);
-  const [tileMessage, setTileMessage] = useState('');
   const tileCollection = useMemo(() => buildFeatureCollection(tileFeatures), [tileFeatures]);
   const nearbyCircleCollection = useMemo(() => {
     if (!nearbyState.center) return buildFeatureCollection([]);
@@ -1331,9 +1364,6 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
       tileLoadControllerRef.current?.abort();
       tileLoadedBoundsRef.current = [];
       setTileFeatures([]);
-      setTileMessage(`Zoom to ${MIN_GEOJSON_TILE_ZOOM}+ to load tile points.`);
-      setIsLoadingTiles(false);
-      setTileLoadTarget(null);
       return;
     }
 
@@ -1342,9 +1372,6 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
 
     if (missingBounds.length === 0) {
       tileRequestKeyRef.current = request.key;
-      setIsLoadingTiles(false);
-      setTileLoadTarget(null);
-      setTileMessage('');
       return;
     }
 
@@ -1355,13 +1382,8 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
 
     const controller = new AbortController();
     tileLoadControllerRef.current = controller;
-    setIsLoadingTiles(true);
-    setTileLoadTarget(GEOJSON_TILE_LOAD_STEPS[0]);
-    setTileMessage('');
 
     let latestFeatures = tileCollectionRef.current?.features || [];
-    let loadedAnyFeatures = latestFeatures.length > 0;
-
     try {
       for (const bounds of missingBounds) {
         const boundsCacheKey = boundsKey(bounds);
@@ -1369,7 +1391,6 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
 
         if (cachedFeatures) {
           latestFeatures = mergeUniqueTileFeatures(latestFeatures, cachedFeatures);
-          loadedAnyFeatures = latestFeatures.length > 0;
           tileLoadedBoundsRef.current = rememberTileLoadedBounds(tileLoadedBoundsRef.current, bounds);
           setTileFeatures(latestFeatures);
           continue;
@@ -1382,8 +1403,6 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
           const previousTargetAmount = index === 0 ? 0 : GEOJSON_TILE_LOAD_STEPS[index - 1];
           const amount = targetAmount - previousTargetAmount;
           const skip = previousTargetAmount;
-          const nextTargetAmount = GEOJSON_TILE_LOAD_STEPS[index + 1];
-          setTileLoadTarget(targetAmount);
 
           const payload = await fetchBuildingsBoundsGeoJson({
             minLatitude: bounds.south,
@@ -1414,34 +1433,19 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
 
           loadedBoundsFeatures = mergeUniqueTileFeatures(loadedBoundsFeatures, nextFeatures);
           latestFeatures = mergeUniqueTileFeatures(latestFeatures, nextFeatures);
-          loadedAnyFeatures = latestFeatures.length > 0;
           setTileFeatures(latestFeatures);
-
-          setTileMessage(
-            nextTargetAmount
-              ? `Loaded ${latestFeatures.length.toLocaleString()} tile points. Loading empty viewport area up to ${nextTargetAmount.toLocaleString()}...`
-              : ''
-          );
         }
 
         writeTileCache(tileCacheRef.current, boundsCacheKey, loadedBoundsFeatures);
         tileLoadedBoundsRef.current = rememberTileLoadedBounds(tileLoadedBoundsRef.current, bounds);
       }
 
-      setTileMessage(loadedAnyFeatures ? '' : 'No tile points in this map area.');
     } catch (error) {
       if (error?.name === 'AbortError') return;
-      if (loadedAnyFeatures) {
-        setTileMessage(`Loaded ${latestFeatures.length.toLocaleString()} tile points. More empty area failed to load.`);
-      } else {
-        setTileMessage(error?.message || 'Failed to load tile points.');
-      }
     } finally {
       if (tileLoadControllerRef.current === controller) {
         tileLoadControllerRef.current = null;
         tileRequestKeyRef.current = '';
-        setIsLoadingTiles(false);
-        setTileLoadTarget(null);
       }
     }
   }, []);
@@ -1780,8 +1784,6 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
         tileViewportTimerRef.current = null;
       }
       tileLoadControllerRef.current?.abort();
-      setIsLoadingTiles(false);
-      setTileLoadTarget(null);
     }
   }, [loadTilesForCurrentViewport, viewMode]);
 
@@ -1881,36 +1883,20 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
         Zoom {zoomLevel.toFixed(1)}
       </div>
       <div className="map-floating">
-        <MapLegend heatmapStats={heatmapData.stats} />
+        {viewMode !== 'tiles' && <MapLegend heatmapStats={heatmapData.stats} />}
         {nearbySearchEnabled && (
-          <div className="map-pill">
+          <div className="map-pill is-hint">
             Click the map to search within {radiusInMeters.toLocaleString()} m
           </div>
         )}
         {isSearchingNearby && (
-          <div className="map-pill">
+          <div className="map-pill is-loading">
+            <span className="map-pill-loader" aria-hidden="true" />
             Finding nearby buildings within {radiusInMeters.toLocaleString()} m...
           </div>
         )}
-        {viewMode === 'tiles' && isLoadingTiles && (
-          <div className="map-pill">
-            {tileFeatures.length > 0
-              ? `Loading up to ${(tileLoadTarget ?? MAX_GEOJSON_TILE_FEATURES).toLocaleString()} tile points...`
-              : `Loading first ${(tileLoadTarget ?? GEOJSON_TILE_LOAD_STEPS[0]).toLocaleString()} tile points...`}
-          </div>
-        )}
-        {viewMode === 'tiles' && tileMessage && (
-          <div className="map-pill">
-            {tileMessage}
-          </div>
-        )}
-        {viewMode === 'tiles' && tileFeatures.length > 0 && (
-          <div className="map-pill">
-            <strong>{tileFeatures.length}</strong> tile points loaded
-          </div>
-        )}
         {nearbyState.results.length > 0 && (
-          <div className="map-pill">
+          <div className="map-pill is-count">
             <strong>{nearbyState.results.length}</strong> nearby loaded coordinates
           </div>
         )}

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Database, Landmark, PlugZap } from 'lucide-react';
+import { ChevronDown, Database, Flame, Landmark, Layers, MapPin, PlugZap, TrendingUp } from 'lucide-react';
 import { fetchBydelStats } from '../services/api.js';
 import { useStore } from '../store/useStore.js';
+import { MAP_VIEW_MODES } from '../utils/constants.js';
 import { OSLO_BYDELER, findBydel } from '../utils/osloBydeler.js';
 
 function RangeField({ label, min, max, value, onChange, suffix = '', step = 1, tooltip = '' }) {
@@ -109,6 +110,21 @@ function HelpLabel({ children, tooltip }) {
   );
 }
 
+function SectionToggle({ children, controlsId, isOpen, onToggle }) {
+  return (
+    <button
+      type="button"
+      className="section-toggle-button"
+      aria-expanded={isOpen}
+      aria-controls={controlsId}
+      onClick={onToggle}
+    >
+      <span className="section-kicker">{children}</span>
+      <ChevronDown className="section-toggle-icon" aria-hidden="true" strokeWidth={2.2} />
+    </button>
+  );
+}
+
 const ENERGY_GRADE_MEANINGS = {
   A: 'best',
   B: 'very good',
@@ -132,6 +148,18 @@ const HEATING_GRADE_ORDER = {
   ORANGE: 2,
   RED: 3
 };
+
+const FILTER_MODE_ICONS = {
+  markers: MapPin,
+  heatmap: Flame,
+  tiles: Layers,
+  upgrade: TrendingUp
+};
+
+const FILTER_MODE_ITEMS = MAP_VIEW_MODES.map((item) => ({
+  ...item,
+  Icon: FILTER_MODE_ICONS[item.value]
+}));
 
 function normalizeHeatingGrade(grade) {
   return String(grade || '').trim().toUpperCase();
@@ -317,6 +345,8 @@ function Filters() {
   const bydelStats = useMemo(() => buildBydelStats(allFeatures), [allFeatures]);
   const [externalBydelStats, setExternalBydelStats] = useState(null);
   const [externalBydelStatus, setExternalBydelStatus] = useState('idle');
+  const [statsOpen, setStatsOpen] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useState(true);
   const bydelStatsCache = useRef(new Map());
 
   useEffect(() => {
@@ -396,16 +426,30 @@ function Filters() {
           </div>
         </div>
         <div className="filter-group view-mode-select">
-          <select
-            aria-label="View mode"
-            value={viewMode}
-            onChange={(event) => setViewMode(event.target.value)}
-          >
-            <option value="markers">Bydeler i Oslo</option>
-            <option value="heatmap">Heatmap</option>
-            <option value="tiles">Tiles</option>
-            <option value="upgrade">Upgrade priority</option>
-          </select>
+          <div className="mode-segment-control" role="group" aria-label="View mode">
+            {FILTER_MODE_ITEMS.map((item) => {
+              const Icon = item.Icon;
+              const isActive = viewMode === item.value;
+
+              return (
+                <button
+                  key={item.value}
+                  type="button"
+                  className={[
+                    'mode-segment-button',
+                    isActive ? 'active' : '',
+                    item.isolated ? 'is-tiles-mode' : ''
+                  ].filter(Boolean).join(' ')}
+                  onClick={() => setViewMode(item.value)}
+                  aria-pressed={isActive}
+                  data-mode={item.value}
+                >
+                  <Icon className="mode-segment-icon" aria-hidden="true" strokeWidth={2.2} />
+                  <span className="mode-segment-label">{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
         {viewMode === 'markers' && (
           <div className="bydel-panel">
@@ -432,50 +476,66 @@ function Filters() {
               <span>{selectedBydel.name}</span>
               <strong>{formatRadius(selectedBydel.radiusInMeters)} radius</strong>
             </div>
-            <div className="bydel-stats-grid">
-              <BydelStatSection Icon={Database}>Database stats</BydelStatSection>
-              <BydelStat label="Buildings" value={bydelStats.total.toLocaleString()} />
-              <BydelStat label="Avg energy" value={formatEnergy(bydelStats.averageEnergy)} />
-              <BydelStat label="Typical energy" value={formatEnergy(bydelStats.medianEnergy)} />
-              <BydelStat label="Common energy grade" value={bydelStats.mostCommonEnergyGrade} />
-              <BydelStat label="Common heating" value={bydelStats.mostCommonHeatingGrade} />
-              <BydelStat label="Avg build year" value={bydelStats.averageBuildYear || 'N/A'} />
-              <BydelStat label="Before 1980" value={`${bydelStats.oldBuildingShare}%`} />
-              <BydelStat label="High upgrade" value={`${bydelStats.highUpgradeShare}%`} />
-              {['A', 'B', 'C', 'D', 'E', 'F', 'G'].map((grade) => (
-                <BydelStat
-                  key={grade}
-                  label={`Energy ${grade}`}
-                  value={formatCountShare(bydelStats.energyGradeCounts[grade], bydelStats.total)}
-                />
-              ))}
-              <BydelStat label="Heating green" value={formatCountShare(bydelStats.heatingGradeCounts.GREEN, bydelStats.total)} />
-              <BydelStat label="Heating yellow" value={formatCountShare(bydelStats.heatingGradeCounts.YELLOW, bydelStats.total)} />
-              <BydelStat label="Heating orange" value={formatCountShare(bydelStats.heatingGradeCounts.ORANGE, bydelStats.total)} />
-              <BydelStat label="Heating red" value={formatCountShare(bydelStats.heatingGradeCounts.RED, bydelStats.total)} />
-
-              <BydelStatSection
-                Icon={Landmark}
-                status={externalBydelStatus === 'loading' ? 'loading' : ''}
+            <div className="section-heading section-heading-compact">
+              <SectionToggle
+                controlsId="bydel-stats-panel"
+                isOpen={statsOpen}
+                onToggle={() => setStatsOpen((open) => !open)}
               >
-                SSB / Oslo stats
-              </BydelStatSection>
-              <BydelStat label="Median price" value={formatCurrency(externalBydelStats?.housing?.medianHousePrice)} />
-              <BydelStat label="Price per m2" value={formatCurrency(externalBydelStats?.housing?.pricePerM2)} />
-              <BydelStat label="Price trend" value={formatPercent(externalBydelStats?.housing?.priceTrendPercent)} />
-              <BydelStat label="Median income" value={formatCurrency(externalBydelStats?.demographics?.medianHouseholdIncome)} />
-              <BydelStat label="Population" value={formatNumber(externalBydelStats?.demographics?.population)} />
-              <BydelStat label="Population growth" value={formatPercent(externalBydelStats?.demographics?.populationGrowthPercent)} />
+                Stats
+              </SectionToggle>
+            </div>
+            <div
+              id="bydel-stats-panel"
+              className={`collapsible-region ${statsOpen ? 'is-open' : ''}`}
+              aria-hidden={!statsOpen}
+              inert={statsOpen ? undefined : ''}
+            >
+              <div className="bydel-stats-grid">
+                <BydelStatSection Icon={Database}>Database stats</BydelStatSection>
+                <BydelStat label="Buildings" value={bydelStats.total.toLocaleString()} />
+                <BydelStat label="Avg energy" value={formatEnergy(bydelStats.averageEnergy)} />
+                <BydelStat label="Typical energy" value={formatEnergy(bydelStats.medianEnergy)} />
+                <BydelStat label="Common energy grade" value={bydelStats.mostCommonEnergyGrade} />
+                <BydelStat label="Common heating" value={bydelStats.mostCommonHeatingGrade} />
+                <BydelStat label="Avg build year" value={bydelStats.averageBuildYear || 'N/A'} />
+                <BydelStat label="Before 1980" value={`${bydelStats.oldBuildingShare}%`} />
+                <BydelStat label="High upgrade" value={`${bydelStats.highUpgradeShare}%`} />
+                {['A', 'B', 'C', 'D', 'E', 'F', 'G'].map((grade) => (
+                  <BydelStat
+                    key={grade}
+                    label={`Energy ${grade}`}
+                    value={formatCountShare(bydelStats.energyGradeCounts[grade], bydelStats.total)}
+                  />
+                ))}
+                <BydelStat label="Heating green" value={formatCountShare(bydelStats.heatingGradeCounts.GREEN, bydelStats.total)} />
+                <BydelStat label="Heating yellow" value={formatCountShare(bydelStats.heatingGradeCounts.YELLOW, bydelStats.total)} />
+                <BydelStat label="Heating orange" value={formatCountShare(bydelStats.heatingGradeCounts.ORANGE, bydelStats.total)} />
+                <BydelStat label="Heating red" value={formatCountShare(bydelStats.heatingGradeCounts.RED, bydelStats.total)} />
 
-              <BydelStatSection Icon={PlugZap}>NOBIL stats</BydelStatSection>
-              <BydelStat label="Public chargers" value={formatNumber(externalBydelStats?.chargers?.publicChargers)} />
-              <BydelStat label="Fast chargers" value={formatNumber(externalBydelStats?.chargers?.fastChargers)} />
-              {externalBydelStatus === 'error' && (
-                <div className="bydel-stat-note">External bydel stats are unavailable.</div>
-              )}
-              {externalBydelStats?.chargers?.status && (
-                <div className="bydel-stat-note">{externalBydelStats.chargers.status}</div>
-              )}
+                <BydelStatSection
+                  Icon={Landmark}
+                  status={externalBydelStatus === 'loading' ? 'loading' : ''}
+                >
+                  SSB / Oslo stats
+                </BydelStatSection>
+                <BydelStat label="Median price" value={formatCurrency(externalBydelStats?.housing?.medianHousePrice)} />
+                <BydelStat label="Price per m2" value={formatCurrency(externalBydelStats?.housing?.pricePerM2)} />
+                <BydelStat label="Price trend" value={formatPercent(externalBydelStats?.housing?.priceTrendPercent)} />
+                <BydelStat label="Median income" value={formatCurrency(externalBydelStats?.demographics?.medianHouseholdIncome)} />
+                <BydelStat label="Population" value={formatNumber(externalBydelStats?.demographics?.population)} />
+                <BydelStat label="Population growth" value={formatPercent(externalBydelStats?.demographics?.populationGrowthPercent)} />
+
+                <BydelStatSection Icon={PlugZap}>NOBIL stats</BydelStatSection>
+                <BydelStat label="Public chargers" value={formatNumber(externalBydelStats?.chargers?.publicChargers)} />
+                <BydelStat label="Fast chargers" value={formatNumber(externalBydelStats?.chargers?.fastChargers)} />
+                {externalBydelStatus === 'error' && (
+                  <div className="bydel-stat-note">External bydel stats are unavailable.</div>
+                )}
+                {externalBydelStats?.chargers?.status && (
+                  <div className="bydel-stat-note">{externalBydelStats.chargers.status}</div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -483,112 +543,123 @@ function Filters() {
 
       <section className="filter-card">
         <div className="section-heading">
-          <div>
-            <div className="section-kicker">Filters</div>
-          </div>
+          <SectionToggle
+            controlsId="filters-fields-panel"
+            isOpen={filtersOpen}
+            onToggle={() => setFiltersOpen((open) => !open)}
+          >
+            Filters
+          </SectionToggle>
           <button type="button" className="reset-button" onClick={resetFilters}>
             Reset
           </button>
         </div>
 
-        <div className="filters-fields">
-          <RangeField
-            label="Build year"
-            min={filterBounds.byggeaar[0]}
-            max={filterBounds.byggeaar[1]}
-            value={filters.byggeaar}
-            onChange={(value) => updateRange('byggeaar', value)}
-          />
-          <RangeField
-            label="Energy use"
-            min={filterBounds.energibruk_kwh_m2[0]}
-            max={filterBounds.energibruk_kwh_m2[1]}
-            value={filters.energibruk_kwh_m2}
-            onChange={(value) => updateRange('energibruk_kwh_m2', value)}
-            suffix=" kWh/m2"
-            tooltip="Energy use is calculated delivered energy per square meter for normal use, shown as kWh/m2. Enova uses this calculated value for the energy grade."
-          />
-          <div className="filter-group radius-control">
-            <div className="filter-label-row">
-              <label htmlFor="radius-range">
-                <HelpLabel tooltip="Radius controls how far from your clicked map point the app searches for nearby buildings. Turn Radius on, choose a distance here, then click the map.">
-                  Radius
-                </HelpLabel>
-              </label>
-              <div className="filter-range-value">{radiusLabel}</div>
-            </div>
-            <input
-              id="radius-range"
-              type="range"
-              min="500"
-              max="10000"
-              step="500"
-              value={radiusInMeters}
-              onChange={(event) => setRadiusInMeters(Number(event.target.value))}
+        <div
+          id="filters-fields-panel"
+          className={`collapsible-region ${filtersOpen ? 'is-open' : ''}`}
+          aria-hidden={!filtersOpen}
+          inert={filtersOpen ? undefined : ''}
+        >
+          <div className="filters-fields">
+            <RangeField
+              label="Build year"
+              min={filterBounds.byggeaar[0]}
+              max={filterBounds.byggeaar[1]}
+              value={filters.byggeaar}
+              onChange={(value) => updateRange('byggeaar', value)}
             />
-          </div>
-          <div className="filter-group">
-            <div className="filter-label-row">
-              <label>
-                <HelpLabel tooltip="Energy grade runs from A to G. A is best and G is weakest. The exact kWh/m2 thresholds vary by building type/category, so loaded data ranges can overlap.">
-                  Energy grade
-                </HelpLabel>
-              </label>
-              <div className="filter-range-value">
-                {selectedEnergyGrades.length === 0 ? 'All' : selectedEnergyGrades.join(', ')}
+            <RangeField
+              label="Energy use"
+              min={filterBounds.energibruk_kwh_m2[0]}
+              max={filterBounds.energibruk_kwh_m2[1]}
+              value={filters.energibruk_kwh_m2}
+              onChange={(value) => updateRange('energibruk_kwh_m2', value)}
+              suffix=" kWh/m2"
+              tooltip="Energy use is calculated delivered energy per square meter for normal use, shown as kWh/m2. Enova uses this calculated value for the energy grade."
+            />
+            <div className="filter-group radius-control">
+              <div className="filter-label-row">
+                <label htmlFor="radius-range">
+                  <HelpLabel tooltip="Radius controls how far from your clicked map point the app searches for nearby buildings. Turn Radius on, choose a distance here, then click the map.">
+                    Radius
+                  </HelpLabel>
+                </label>
+                <div className="filter-range-value">{radiusLabel}</div>
+              </div>
+              <input
+                id="radius-range"
+                type="range"
+                min="500"
+                max="10000"
+                step="500"
+                value={radiusInMeters}
+                onChange={(event) => setRadiusInMeters(Number(event.target.value))}
+              />
+            </div>
+            <div className="filter-group">
+              <div className="filter-label-row">
+                <label>
+                  <HelpLabel tooltip="Energy grade runs from A to G. A is best and G is weakest. The exact kWh/m2 thresholds vary by building type/category, so loaded data ranges can overlap.">
+                    Energy grade
+                  </HelpLabel>
+                </label>
+                <div className="filter-range-value">
+                  {selectedEnergyGrades.length === 0 ? 'All' : selectedEnergyGrades.join(', ')}
+                </div>
+              </div>
+              <div className="checkbox-filter-list">
+                {energyGrades.map(({ grade, meaning }) => (
+                  <label key={grade} className="checkbox-filter-option">
+                    <input
+                      type="checkbox"
+                      checked={selectedEnergyGrades.includes(grade)}
+                      onChange={() => toggleEnergyGrade(grade)}
+                    />
+                    <span className="filter-option-copy">
+                      <strong>{grade}</strong>
+                      <span>{meaning}</span>
+                    </span>
+                  </label>
+                ))}
               </div>
             </div>
-            <div className="checkbox-filter-list">
-              {energyGrades.map(({ grade, meaning }) => (
-                <label key={grade} className="checkbox-filter-option">
-                  <input
-                    type="checkbox"
-                    checked={selectedEnergyGrades.includes(grade)}
-                    onChange={() => toggleEnergyGrade(grade)}
-                  />
-                  <span className="filter-option-copy">
-                    <strong>{grade}</strong>
-                    <span>{meaning}</span>
-                  </span>
+            <div className="filter-group">
+              <div className="filter-label-row">
+                <label>
+                  <HelpLabel tooltip="Heating grade describes the heating energy source. Green means a very high share of renewable/non-electric heating. Yellow means moderate renewable heating. Orange is mostly electric heating. Red is predominantly direct electric or fossil-fuel heating.">
+                    Heating grade
+                  </HelpLabel>
                 </label>
-              ))}
-            </div>
-          </div>
-          <div className="filter-group">
-            <div className="filter-label-row">
-              <label>
-                <HelpLabel tooltip="Heating grade describes the heating energy source. Green means a very high share of renewable/non-electric heating. Yellow means moderate renewable heating. Orange is mostly electric heating. Red is predominantly direct electric or fossil-fuel heating.">
-                  Heating grade
-                </HelpLabel>
-              </label>
-            </div>
-            <div className="checkbox-filter-list">
-              <label className="checkbox-filter-option">
-                <input
-                  type="radio"
-                  name="heating-grade"
-                  checked={filters.oppvarmingskarakter === 'all'}
-                  onChange={() => updateSelect('oppvarmingskarakter', 'all')}
-                />
-                <span className="filter-option-copy">
-                  <strong>All</strong>
-                  <span>all heating scores</span>
-                </span>
-              </label>
-              {heatingGrades.map((grade) => (
-                <label key={grade} className="checkbox-filter-option">
+              </div>
+              <div className="checkbox-filter-list">
+                <label className="checkbox-filter-option">
                   <input
                     type="radio"
                     name="heating-grade"
-                    checked={filters.oppvarmingskarakter === grade}
-                    onChange={() => updateSelect('oppvarmingskarakter', grade)}
+                    checked={filters.oppvarmingskarakter === 'all'}
+                    onChange={() => updateSelect('oppvarmingskarakter', 'all')}
                   />
                   <span className="filter-option-copy">
-                    <strong>{grade}</strong>
-                    <span>{heatingGradeMeaning(grade)}</span>
+                    <strong>All</strong>
+                    <span>all heating scores</span>
                   </span>
                 </label>
-              ))}
+                {heatingGrades.map((grade) => (
+                  <label key={grade} className="checkbox-filter-option">
+                    <input
+                      type="radio"
+                      name="heating-grade"
+                      checked={filters.oppvarmingskarakter === grade}
+                      onChange={() => updateSelect('oppvarmingskarakter', grade)}
+                    />
+                    <span className="filter-option-copy">
+                      <strong>{grade}</strong>
+                      <span>{heatingGradeMeaning(grade)}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
             </div>
           </div>
         </div>

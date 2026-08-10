@@ -2,6 +2,13 @@ export const DEFAULT_RADIUS = 5000;
 export const DEFAULT_CENTER = [10.7522, 59.9139];
 export const DEFAULT_ZOOM = 5.2;
 
+export const MAP_VIEW_MODES = [
+  { value: 'markers', label: 'Bydeler i Oslo' },
+  { value: 'heatmap', label: 'Heatmap' },
+  { value: 'tiles', label: 'Enkel bygg', isolated: true },
+  { value: 'upgrade', label: 'Upgrade priority' }
+];
+
 export const SOURCE_IDS = {
   buildings: 'buildings',
   upgradeBuildings: 'upgrade-buildings',

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Search, X } from 'lucide-react';
 import { useStore } from '../store/useStore.js';
 import '../styles/searchbar.css';
 
@@ -28,14 +29,20 @@ function SearchBar({
       feature.properties.kommunenavn
     ].filter(Boolean).join(' | ') || 'Location not registered'
   );
+  const selectSuggestion = (feature) => {
+    onSuggestionSelect(feature);
+    setOpen(false);
+  };
 
   return (
     <div className="search-layout">
       <div className="search-left">
         <div className="search-wrapper" ref={wrapperRef}>
-          <div className="search-shell">
+          <div className={`search-shell ${hasData ? '' : 'is-disabled'}`}>
+            <Search className="search-input-icon" aria-hidden="true" strokeWidth={2.2} />
             <input
               type="text"
+              aria-label="Search buildings"
               value={searchQuery}
               disabled={!hasData}
               onChange={(event) => {
@@ -43,26 +50,33 @@ function SearchBar({
                 setOpen(true);
               }}
               onFocus={() => setOpen(true)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  setOpen(false);
+                  event.currentTarget.blur();
+                }
+
+                if (event.key === 'Enter' && visibleSuggestions.length > 0) {
+                  selectSuggestion(visibleSuggestions[0]);
+                }
+              }}
               placeholder={hasData ? 'Search by adresse, poststed, or kommunenavn' : 'No building data loaded'}
             />
             {searchQuery && (
-              <button type="button" className="inline-ghost" onClick={() => {
+              <button type="button" className="inline-ghost search-clear-button" aria-label="Clear search" onClick={() => {
                 setSearchQuery('');
                 setOpen(false);
               }}>
-                Clear
+                <X aria-hidden="true" strokeWidth={2.2} />
               </button>
             )}
           </div>
 
           {open && searchQuery.trim() && (
-              <div className="suggestions-panel">
+              <div className="suggestions-panel" role="listbox" aria-label="Search suggestions">
                 {visibleSuggestions.length > 0 ? (
                   visibleSuggestions.map((feature) => (
-                    <button key={feature.id} type="button" className="suggestion-item" onClick={() => {
-                      onSuggestionSelect(feature);
-                      setOpen(false);
-                    }}>
+                    <button key={feature.id} type="button" className="suggestion-item" role="option" onClick={() => selectSuggestion(feature)}>
                       <span className="suggestion-dot" />
                       <span className="suggestion-copy">
                         <strong>{feature.properties.adresse || 'Unknown address'}</strong>
