@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import { Flame, Layers, MapPin, TrendingUp } from 'lucide-react';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { fetchTilePointDetails, fetchTilePointsBounds } from '../services/api.js';
+import { fetchBuildingsBoundsGeoJson, fetchTilePointDetails, fetchTilePointsBounds } from '../services/api.js';
 import { useStore } from '../store/useStore.js';
 import { buildFeatureCollection, buildNearbyCircleGeoJson, buildNearbyGeoJson } from '../utils/geo.js';
 import { normalizeGeoJson } from '../utils/filtering.js';
@@ -290,9 +290,47 @@ function tileDetailId(feature) {
   return properties.denormId || properties.id || feature?.id || null;
 }
 
-function tileDetailFeatureFromPayload(payload, id) {
+function tileDetailFeatureFromPayloadForClick(payload, id, fallbackFeature) {
   const normalized = normalizeGeoJson(payload);
-  return findFeatureById(normalized.features, id) || normalized.features[0] || null;
+  const byId = findFeatureById(normalized.features, id);
+  if (byId) return byId;
+
+  const fallbackCoordinateKey = coordinateKey(fallbackFeature);
+  const fallbackAddress = String(fallbackFeature?.properties?.adresse || '').trim().toLowerCase();
+  const byCoordinateAndAddress = normalized.features.find((feature) => (
+    coordinateKey(feature) === fallbackCoordinateKey &&
+    (!fallbackAddress || String(feature.properties?.adresse || '').trim().toLowerCase() === fallbackAddress)
+  ));
+
+  return byCoordinateAndAddress || normalized.features[0] || null;
+}
+
+async function fetchTileDetailPayload(feature, options = {}) {
+  const detailId = tileDetailId(feature);
+
+  if (detailId) {
+    try {
+      return await fetchTilePointDetails(detailId, options);
+    } catch (error) {
+      if (error?.name === 'AbortError') throw error;
+    }
+  }
+
+  const [longitude, latitude] = feature?.geometry?.coordinates || [];
+  const lon = Number(longitude);
+  const lat = Number(latitude);
+
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+    return null;
+  }
+
+  return fetchBuildingsBoundsGeoJson({
+    minLatitude: lat - TILE_DETAIL_BOUNDS_PADDING_DEGREES,
+    minLongitude: lon - TILE_DETAIL_BOUNDS_PADDING_DEGREES,
+    maxLatitude: lat + TILE_DETAIL_BOUNDS_PADDING_DEGREES,
+    maxLongitude: lon + TILE_DETAIL_BOUNDS_PADDING_DEGREES,
+    amount: TILE_DETAIL_FALLBACK_AMOUNT
+  }, options);
 }
 
 function idsMatch(left, right) {
@@ -722,6 +760,8 @@ const MAX_GEOJSON_TILE_LOADED_AREAS = 24;
 const GEOJSON_TILE_MOVE_DEBOUNCE_MS = 700;
 const GEOJSON_TILE_CACHE_ZOOM_STEP = 0.5;
 const GEOJSON_TILE_CACHE_BOUNDS_STEP_DEGREES = 0.005;
+const TILE_DETAIL_BOUNDS_PADDING_DEGREES = 0.00008;
+const TILE_DETAIL_FALLBACK_AMOUNT = 250;
 
 function snapNumber(value, step, decimals) {
   return Number((Math.round(value / step) * step).toFixed(decimals));
@@ -1696,13 +1736,11 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
           tilePopupHtml(fallbackProperties)
         );
 
-        if (!detailId) return;
-
         const controller = new AbortController();
         tileDetailControllerRef.current = controller;
 
         try {
-          const payload = await fetchTilePointDetails(detailId, {
+          const payload = await fetchTileDetailPayload(feature, {
             signal: controller.signal
           });
 
@@ -1714,7 +1752,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
             return;
           }
 
-          const detailFeature = tileDetailFeatureFromPayload(payload, detailId);
+          const detailFeature = tileDetailFeatureFromPayloadForClick(payload, detailId, feature);
           if (!detailFeature) return;
 
           const detailCoordinates = detailFeature.geometry?.coordinates?.slice() || coordinates;
