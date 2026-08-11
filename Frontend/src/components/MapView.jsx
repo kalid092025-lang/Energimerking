@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import { Flame, Layers, MapPin, TrendingUp } from 'lucide-react';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { fetchBuildingsBoundsGeoJson } from '../services/api.js';
+import { fetchTilePointDetails, fetchTilePointsBounds } from '../services/api.js';
 import { useStore } from '../store/useStore.js';
 import { buildFeatureCollection, buildNearbyCircleGeoJson, buildNearbyGeoJson } from '../utils/geo.js';
 import { normalizeGeoJson } from '../utils/filtering.js';
+import { normalizeTilePointsPayload, tileCursorParams } from '../utils/tilePoints.js';
 import {
   DARK_MAP_STYLE_URL,
   DEFAULT_CENTER,
@@ -282,6 +283,16 @@ function popupHtmlForMode(properties, mode) {
 
 function tilePopupHtml(properties) {
   return popupHtml(properties);
+}
+
+function tileDetailId(feature) {
+  const properties = feature?.properties || {};
+  return properties.denormId || properties.id || feature?.id || null;
+}
+
+function tileDetailFeatureFromPayload(payload, id) {
+  const normalized = normalizeGeoJson(payload);
+  return findFeatureById(normalized.features, id) || normalized.features[0] || null;
 }
 
 function idsMatch(left, right) {
@@ -702,9 +713,12 @@ function setLayerVisibility(map, layerId, visibility) {
 }
 
 const MIN_GEOJSON_TILE_ZOOM = 12;
-const GEOJSON_TILE_LOAD_STEPS = [5000, 10000, 50000];
+const TILE_POINT_FIRST_BATCH_LIMIT = 2000;
+const TILE_POINT_BACKGROUND_BATCH_LIMIT = 3000;
+const TILE_POINT_MAX_REQUESTS_PER_BOUNDS = 6;
+const TILE_POINT_RENDER_LIMIT = 15000;
 const MAX_GEOJSON_TILE_CACHE_ENTRIES = 24;
-const MAX_GEOJSON_TILE_LOADED_AREAS = 48;
+const MAX_GEOJSON_TILE_LOADED_AREAS = 24;
 const GEOJSON_TILE_MOVE_DEBOUNCE_MS = 700;
 const GEOJSON_TILE_CACHE_ZOOM_STEP = 0.5;
 const GEOJSON_TILE_CACHE_BOUNDS_STEP_DEGREES = 0.005;
@@ -729,6 +743,16 @@ function boundsKey(bounds) {
     bounds.east.toFixed(3),
     bounds.north.toFixed(3)
   ].join(':');
+}
+
+function boundsFromKey(key) {
+  const [west, south, east, north] = String(key).split(':').map(Number);
+
+  if (![west, south, east, north].every(Number.isFinite)) {
+    return null;
+  }
+
+  return { west, south, east, north };
 }
 
 function isValidBounds(bounds) {
@@ -828,6 +852,53 @@ function writeTileCache(cache, key, features) {
   }
 }
 
+function isFeatureInsideBounds(feature, bounds) {
+  const [longitude, latitude] = feature?.geometry?.coordinates || [];
+  const lon = Number(longitude);
+  const lat = Number(latitude);
+
+  return (
+    Number.isFinite(lon) &&
+    Number.isFinite(lat) &&
+    lon >= bounds.west &&
+    lon <= bounds.east &&
+    lat >= bounds.south &&
+    lat <= bounds.north
+  );
+}
+
+function capTileFeaturesForViewport(features, bounds) {
+  return features
+    .filter((feature) => isFeatureInsideBounds(feature, bounds))
+    .slice(-TILE_POINT_RENDER_LIMIT);
+}
+
+function cachedTileFeaturesForViewport(cache, viewportBounds) {
+  let features = [];
+
+  cache.forEach((cachedFeatures, key) => {
+    const cachedBounds = boundsFromKey(key);
+    if (!cachedBounds || !boundsOverlap(viewportBounds, cachedBounds)) return;
+
+    features = mergeUniqueTileFeatures(features, cachedFeatures);
+  });
+
+  return features;
+}
+
+function cachedBoundsForViewport(cache, viewportBounds) {
+  const cachedBoundsList = [];
+
+  cache.forEach((_, key) => {
+    const cachedBounds = boundsFromKey(key);
+    if (!cachedBounds || !boundsOverlap(viewportBounds, cachedBounds)) return;
+
+    cachedBoundsList.push(cachedBounds);
+  });
+
+  return cachedBoundsList;
+}
+
 function normalizedTileKeyPart(value) {
   return value === null || value === undefined ? '' : String(value).trim().toLowerCase();
 }
@@ -840,6 +911,12 @@ function normalizedTileCoordinate(value) {
 function tileFeatureKey(feature) {
   const properties = feature?.properties || {};
   const coordinates = feature?.geometry?.coordinates || [];
+  const explicitId = normalizedTileKeyPart(feature?.id || properties.denormId || properties.id);
+
+  if (explicitId) {
+    return `id:${explicitId}`;
+  }
+
   const stableParts = [
     properties.kommunenummer,
     properties.gard,
@@ -857,7 +934,7 @@ function tileFeatureKey(feature) {
     return stableParts.join('|');
   }
 
-  return normalizedTileKeyPart(feature?.id || properties.id);
+  return '';
 }
 
 function mergeUniqueTileFeatures(existingFeatures, nextFeatures) {
@@ -1258,6 +1335,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
   const popupRef = useRef(null);
   const featuresRef = useRef(features);
   const tileLoadControllerRef = useRef(null);
+  const tileDetailControllerRef = useRef(null);
   const tileViewportTimerRef = useRef(null);
   const tileRequestKeyRef = useRef('');
   const tileCacheRef = useRef(new Map());
@@ -1272,6 +1350,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
   const radiusInMeters = useStore((state) => state.radiusInMeters);
   const setSelectedFeature = useStore((state) => state.setSelectedFeature);
   const [zoomLevel, setZoomLevel] = useState(DEFAULT_ZOOM);
+  const [isTileLoading, setIsTileLoading] = useState(false);
   const featureCollection = useMemo(() => buildFeatureCollection(features), [features]);
   const heatmapData = useMemo(() => buildHeatmapData(features), [features]);
   const nearbyCollection = useMemo(() => buildNearbyGeoJson(nearbyState.results), [nearbyState.results]);
@@ -1364,16 +1443,35 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
       tileLoadControllerRef.current?.abort();
       tileLoadedBoundsRef.current = [];
       setTileFeatures([]);
+      setIsTileLoading(false);
       return;
     }
 
-    const missingBounds = missingBoundsForViewport(request.bounds, tileLoadedBoundsRef.current);
-    const missingRequestKey = missingBounds.map(boundsKey).join('|');
+    const cachedViewportFeatures = cachedTileFeaturesForViewport(tileCacheRef.current, request.bounds);
+    const cachedViewportBounds = cachedBoundsForViewport(tileCacheRef.current, request.bounds);
+    let missingBounds = missingBoundsForViewport(
+      request.bounds,
+      [...tileLoadedBoundsRef.current, ...cachedViewportBounds]
+    );
 
     if (missingBounds.length === 0) {
-      tileRequestKeyRef.current = request.key;
-      return;
+      const nextFeatures = capTileFeaturesForViewport(
+        mergeUniqueTileFeatures(tileCollectionRef.current?.features || [], cachedViewportFeatures),
+        request.bounds
+      );
+
+      if (nextFeatures.length > 0) {
+        setTileFeatures(nextFeatures);
+        tileRequestKeyRef.current = request.key;
+        setIsTileLoading(false);
+        return;
+      }
+
+      tileLoadedBoundsRef.current = [];
+      missingBounds = [request.bounds];
     }
+
+    const missingRequestKey = missingBounds.map(boundsKey).join('|');
 
     if (missingRequestKey === tileRequestKeyRef.current) return;
 
@@ -1382,35 +1480,40 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
 
     const controller = new AbortController();
     tileLoadControllerRef.current = controller;
+    setIsTileLoading(true);
 
-    let latestFeatures = tileCollectionRef.current?.features || [];
+    let latestFeatures = capTileFeaturesForViewport(
+      mergeUniqueTileFeatures(tileCollectionRef.current?.features || [], cachedViewportFeatures),
+      request.bounds
+    );
     try {
       for (const bounds of missingBounds) {
         const boundsCacheKey = boundsKey(bounds);
         const cachedFeatures = readTileCache(tileCacheRef.current, boundsCacheKey);
 
         if (cachedFeatures) {
-          latestFeatures = mergeUniqueTileFeatures(latestFeatures, cachedFeatures);
+          latestFeatures = capTileFeaturesForViewport(
+            mergeUniqueTileFeatures(latestFeatures, cachedFeatures),
+            request.bounds
+          );
           tileLoadedBoundsRef.current = rememberTileLoadedBounds(tileLoadedBoundsRef.current, bounds);
           setTileFeatures(latestFeatures);
           continue;
         }
 
         let loadedBoundsFeatures = [];
+        let cursor = null;
 
-        for (let index = 0; index < GEOJSON_TILE_LOAD_STEPS.length; index += 1) {
-          const targetAmount = GEOJSON_TILE_LOAD_STEPS[index];
-          const previousTargetAmount = index === 0 ? 0 : GEOJSON_TILE_LOAD_STEPS[index - 1];
-          const amount = targetAmount - previousTargetAmount;
-          const skip = previousTargetAmount;
+        for (let index = 0; index < TILE_POINT_MAX_REQUESTS_PER_BOUNDS; index += 1) {
+          const limit = index === 0 ? TILE_POINT_FIRST_BATCH_LIMIT : TILE_POINT_BACKGROUND_BATCH_LIMIT;
 
-          const payload = await fetchBuildingsBoundsGeoJson({
+          const payload = await fetchTilePointsBounds({
             minLatitude: bounds.south,
             minLongitude: bounds.west,
             maxLatitude: bounds.north,
             maxLongitude: bounds.east,
-            amount,
-            skip
+            limit,
+            ...tileCursorParams(cursor)
           }, {
             signal: controller.signal
           });
@@ -1424,7 +1527,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
             return;
           }
 
-          const normalized = normalizeGeoJson(payload);
+          const normalized = normalizeTilePointsPayload(payload);
           const nextFeatures = normalized.features;
 
           if (nextFeatures.length === 0) {
@@ -1432,8 +1535,17 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
           }
 
           loadedBoundsFeatures = mergeUniqueTileFeatures(loadedBoundsFeatures, nextFeatures);
-          latestFeatures = mergeUniqueTileFeatures(latestFeatures, nextFeatures);
+          latestFeatures = capTileFeaturesForViewport(
+            mergeUniqueTileFeatures(latestFeatures, nextFeatures),
+            request.bounds
+          );
           setTileFeatures(latestFeatures);
+
+          if (!normalized.hasMore || !normalized.nextCursor) {
+            break;
+          }
+
+          cursor = normalized.nextCursor;
         }
 
         writeTileCache(tileCacheRef.current, boundsCacheKey, loadedBoundsFeatures);
@@ -1446,6 +1558,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
       if (tileLoadControllerRef.current === controller) {
         tileLoadControllerRef.current = null;
         tileRequestKeyRef.current = '';
+        setIsTileLoading(false);
       }
     }
   }, []);
@@ -1567,16 +1680,60 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
         );
       });
 
-      map.on('click', LAYER_IDS.energyTilePoints, (event) => {
+      map.on('click', LAYER_IDS.energyTilePoints, async (event) => {
         const feature = event.features?.[0];
         if (!feature) return;
 
+        const coordinates = feature.geometry.coordinates.slice();
+        const fallbackProperties = feature.properties || {};
+        const detailId = tileDetailId(feature);
+
+        tileDetailControllerRef.current?.abort();
         popupRef.current?.remove();
         popupRef.current = openPopup(
           map,
-          feature.geometry.coordinates.slice(),
-          tilePopupHtml(feature.properties)
+          coordinates,
+          tilePopupHtml(fallbackProperties)
         );
+
+        if (!detailId) return;
+
+        const controller = new AbortController();
+        tileDetailControllerRef.current = controller;
+
+        try {
+          const payload = await fetchTilePointDetails(detailId, {
+            signal: controller.signal
+          });
+
+          if (
+            controller.signal.aborted ||
+            tileDetailControllerRef.current !== controller ||
+            viewModeRef.current !== 'tiles'
+          ) {
+            return;
+          }
+
+          const detailFeature = tileDetailFeatureFromPayload(payload, detailId);
+          if (!detailFeature) return;
+
+          const detailCoordinates = detailFeature.geometry?.coordinates?.slice() || coordinates;
+          setSelectedFeature(detailFeature);
+          popupRef.current?.remove();
+          popupRef.current = openPopup(
+            map,
+            detailCoordinates,
+            tilePopupHtml(detailFeature.properties)
+          );
+        } catch (error) {
+          if (error?.name !== 'AbortError') {
+            console.warn('Could not load tile point details.', error);
+          }
+        } finally {
+          if (tileDetailControllerRef.current === controller) {
+            tileDetailControllerRef.current = null;
+          }
+        }
       });
 
       // Add delegated click handler for unit selection at the document level
@@ -1677,6 +1834,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
       map.on('click', (event) => {
         const hits = map.queryRenderedFeatures(event.point, { layers: [LAYER_IDS.clusters, LAYER_IDS.points, LAYER_IDS.heatmapPoints, LAYER_IDS.upgradePriorityPoints, LAYER_IDS.energyTilePoints, LAYER_IDS.nearby] });
         if (hits.length > 0) return;
+        tileDetailControllerRef.current?.abort();
         popupRef.current?.remove();
         popupRef.current = null;
         setSelectedFeature(null);
@@ -1706,6 +1864,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
         tileViewportTimerRef.current = null;
       }
       tileLoadControllerRef.current?.abort();
+      tileDetailControllerRef.current?.abort();
       mapRef.current?._cleanup?.();
       map.off('zoom', updateZoomLevel);
       map.off('moveend', handleTileViewportMoveEnd);
@@ -1784,6 +1943,8 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
         tileViewportTimerRef.current = null;
       }
       tileLoadControllerRef.current?.abort();
+      tileDetailControllerRef.current?.abort();
+      setIsTileLoading(false);
     }
   }, [loadTilesForCurrentViewport, viewMode]);
 
@@ -1884,6 +2045,12 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
       </div>
       <div className="map-floating">
         {viewMode !== 'tiles' && <MapLegend heatmapStats={heatmapData.stats} />}
+        {viewMode === 'tiles' && isTileLoading && (
+          <div className="map-pill is-loading is-tile-loading">
+            <span className="map-pill-loader" aria-hidden="true" />
+            Loading Enkel bygg
+          </div>
+        )}
         {nearbySearchEnabled && (
           <div className="map-pill is-hint">
             Click the map to search within {radiusInMeters.toLocaleString()} m

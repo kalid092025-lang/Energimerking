@@ -339,6 +339,93 @@ namespace WebApi.Controllers
                 return StatusCode(500, $"Feil: {ex.Message}");
             }
         }
+
+        [HttpGet("GetBoundsTilePoints")]
+        public async Task<IActionResult> GetBoundsTilePoints(
+            double minLatitude,
+            double minLongitude,
+            double maxLatitude,
+            double maxLongitude,
+            int limit = 2000,
+            double? cursorLat = null,
+            double? cursorLon = null,
+            int? cursorId = null
+        )
+        {
+            if (minLatitude < -90 || minLatitude > 90 || maxLatitude < -90 || maxLatitude > 90)
+            {
+                return BadRequest("Latitude must be between -90 and 90.");
+            }
+            if (minLongitude < -180 || minLongitude > 180 || maxLongitude < -180 || maxLongitude > 180)
+            {
+                return BadRequest("Longitude must be between -180 and 180.");
+            }
+            if (limit <= 0 || limit > 5000)
+            {
+                return BadRequest("Limit must be between 1 and 5000.");
+            }
+
+            var hasAnyCursor = cursorLat.HasValue || cursorLon.HasValue || cursorId.HasValue;
+            var hasFullCursor = cursorLat.HasValue && cursorLon.HasValue && cursorId.HasValue;
+            if (hasAnyCursor && !hasFullCursor)
+            {
+                return BadRequest("cursorLat, cursorLon, and cursorId must be supplied together.");
+            }
+            if (cursorLat is < -90 or > 90)
+            {
+                return BadRequest("cursorLat must be between -90 and 90.");
+            }
+            if (cursorLon is < -180 or > 180)
+            {
+                return BadRequest("cursorLon must be between -180 and 180.");
+            }
+            if (cursorId is <= 0)
+            {
+                return BadRequest("cursorId must be greater than 0.");
+            }
+
+            try
+            {
+                var result = await _service.GetBoundsTilePoints(
+                    minLatitude,
+                    minLongitude,
+                    maxLatitude,
+                    maxLongitude,
+                    limit,
+                    cursorLat,
+                    cursorLon,
+                    cursorId);
+
+                return Ok(result);
+            } catch (Exception ex)
+            {
+                return StatusCode(500, $"Feil: {ex.Message}");
+            }
+        }
+
+        [HttpGet("GetTilePointDetails")]
+        public async Task<IActionResult> GetTilePointDetails(int id)
+        {
+            if (id <= 0)
+            {
+                return BadRequest("Id must be greater than 0.");
+            }
+
+            try
+            {
+                var result = await _service.GetTilePointDetails(id);
+
+                if (result == null)
+                {
+                    return NotFound("Tile point was not found.");
+                }
+
+                return Ok(result);
+            } catch (Exception ex)
+            {
+                return StatusCode(500, $"Feil: {ex.Message}");
+            }
+        }
         /// <summary>
         /// Dette er bare ett leke-endepunkt.
         /// </summary>

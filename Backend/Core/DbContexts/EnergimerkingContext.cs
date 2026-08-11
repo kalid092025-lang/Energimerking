@@ -206,6 +206,9 @@ public partial class EnergimerkingContext : DbContext
 
             entity.ToTable("denorm_matrikkel_og_enova_oslo");
 
+            entity.HasIndex(e => new { e.Lat, e.Lon, e.Id }, "idx_denorm_oslo_tile_bounds")
+                .HasFilter("\"kommuneNr\" IS NOT NULL AND coordinate IS NOT NULL AND lat IS NOT NULL AND lon IS NOT NULL");
+
             entity.Property(e => e.Id)
                 .UseIdentityAlwaysColumn()
                 .HasColumnName("id");
