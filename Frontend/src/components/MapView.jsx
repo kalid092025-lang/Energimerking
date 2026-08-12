@@ -638,13 +638,15 @@ function formatEnergy(value) {
 
 function MapLegend({ heatmapStats }) {
   const viewMode = useStore((state) => state.viewMode);
+  const bydelDisplayMode = useStore((state) => state.bydelDisplayMode);
+  const showHeatmapLegend = viewMode === 'heatmap' || (viewMode === 'markers' && bydelDisplayMode === 'heatmap');
   const heatmapStart = formatEnergy(heatmapStats.p50);
   const heatmapEnd = `${formatEnergy(heatmapStats.p95)}+`;
 
   return (
     <div className="map-legend">
       <div className="legend-kicker">Information card</div>
-      {viewMode === 'heatmap' ? (
+      {showHeatmapLegend ? (
         <>
           <div className="legend-copy">Energy use per building location</div>
           <div className="legend-gradient" />
@@ -751,12 +753,16 @@ function setLayerVisibility(map, layerId, visibility) {
 }
 
 const MIN_GEOJSON_TILE_ZOOM = 12;
-const TILE_POINT_FIRST_BATCH_LIMIT = 2000;
-const TILE_POINT_BACKGROUND_BATCH_LIMIT = 3000;
-const TILE_POINT_MAX_REQUESTS_PER_BOUNDS = 6;
+const TILE_POINT_FIRST_BATCH_LIMIT = 900;
+const TILE_POINT_BACKGROUND_BATCH_LIMIT = 900;
+const TILE_POINT_MAX_REQUESTS_PER_BOUNDS = 2;
 const TILE_POINT_RENDER_LIMIT = 15000;
-const MAX_GEOJSON_TILE_CACHE_ENTRIES = 24;
-const MAX_GEOJSON_TILE_LOADED_AREAS = 24;
+const TILE_POINT_LOAD_GRID_COLUMNS = 3;
+const TILE_POINT_LOAD_GRID_ROWS = 3;
+const TILE_POINT_RENDER_GRID_COLUMNS = 5;
+const TILE_POINT_RENDER_GRID_ROWS = 4;
+const MAX_GEOJSON_TILE_CACHE_ENTRIES = 54;
+const MAX_GEOJSON_TILE_LOADED_AREAS = 54;
 const GEOJSON_TILE_MOVE_DEBOUNCE_MS = 700;
 const GEOJSON_TILE_CACHE_ZOOM_STEP = 0.5;
 const GEOJSON_TILE_CACHE_BOUNDS_STEP_DEGREES = 0.005;
@@ -778,10 +784,10 @@ function snapBoundsOut(bounds, step) {
 
 function boundsKey(bounds) {
   return [
-    bounds.west.toFixed(3),
-    bounds.south.toFixed(3),
-    bounds.east.toFixed(3),
-    bounds.north.toFixed(3)
+    bounds.west.toFixed(4),
+    bounds.south.toFixed(4),
+    bounds.east.toFixed(4),
+    bounds.north.toFixed(4)
   ].join(':');
 }
 
@@ -846,6 +852,33 @@ function rememberTileLoadedBounds(loadedBoundsList, bounds) {
   return [...loadedBoundsList, bounds].slice(-MAX_GEOJSON_TILE_LOADED_AREAS);
 }
 
+function splitBoundsIntoGrid(bounds, columns = TILE_POINT_LOAD_GRID_COLUMNS, rows = TILE_POINT_LOAD_GRID_ROWS) {
+  const width = (bounds.east - bounds.west) / columns;
+  const height = (bounds.north - bounds.south) / rows;
+  const cells = [];
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const cell = {
+        west: bounds.west + (width * column),
+        south: bounds.south + (height * row),
+        east: column === columns - 1 ? bounds.east : bounds.west + (width * (column + 1)),
+        north: row === rows - 1 ? bounds.north : bounds.south + (height * (row + 1))
+      };
+
+      if (isValidBounds(cell)) {
+        cells.push(cell);
+      }
+    }
+  }
+
+  return cells;
+}
+
+function splitMissingBoundsForTileRequests(missingBounds) {
+  return missingBounds.flatMap((bounds) => splitBoundsIntoGrid(bounds));
+}
+
 function tileViewportRequest(map) {
   const rawZoom = map.getZoom();
   const zoom = Number(rawZoom.toFixed(1));
@@ -907,10 +940,72 @@ function isFeatureInsideBounds(feature, bounds) {
   );
 }
 
+function tileRenderBucketIndex(feature, bounds) {
+  const [longitude, latitude] = feature?.geometry?.coordinates || [];
+  const lon = Number(longitude);
+  const lat = Number(latitude);
+
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return -1;
+
+  const lonSpan = bounds.east - bounds.west || 1;
+  const latSpan = bounds.north - bounds.south || 1;
+  const column = Math.max(
+    0,
+    Math.min(TILE_POINT_RENDER_GRID_COLUMNS - 1, Math.floor(((lon - bounds.west) / lonSpan) * TILE_POINT_RENDER_GRID_COLUMNS))
+  );
+  const row = Math.max(
+    0,
+    Math.min(TILE_POINT_RENDER_GRID_ROWS - 1, Math.floor(((lat - bounds.south) / latSpan) * TILE_POINT_RENDER_GRID_ROWS))
+  );
+
+  return (row * TILE_POINT_RENDER_GRID_COLUMNS) + column;
+}
+
+function evenlyCapTileFeatures(features, bounds, limit) {
+  const bucketCount = TILE_POINT_RENDER_GRID_COLUMNS * TILE_POINT_RENDER_GRID_ROWS;
+  const buckets = Array.from({ length: bucketCount }, () => []);
+
+  features.forEach((feature) => {
+    const bucketIndex = tileRenderBucketIndex(feature, bounds);
+    if (bucketIndex >= 0) {
+      buckets[bucketIndex].push(feature);
+    }
+  });
+
+  const capped = [];
+  const baseQuota = Math.max(1, Math.floor(limit / bucketCount));
+
+  buckets.forEach((bucket) => {
+    capped.push(...bucket.slice(0, baseQuota));
+  });
+
+  let offset = baseQuota;
+  while (capped.length < limit) {
+    let added = false;
+
+    for (const bucket of buckets) {
+      if (capped.length >= limit) break;
+      if (offset < bucket.length) {
+        capped.push(bucket[offset]);
+        added = true;
+      }
+    }
+
+    if (!added) break;
+    offset += 1;
+  }
+
+  return capped;
+}
+
 function capTileFeaturesForViewport(features, bounds) {
-  return features
-    .filter((feature) => isFeatureInsideBounds(feature, bounds))
-    .slice(-TILE_POINT_RENDER_LIMIT);
+  const visibleFeatures = features.filter((feature) => isFeatureInsideBounds(feature, bounds));
+
+  if (visibleFeatures.length <= TILE_POINT_RENDER_LIMIT) {
+    return visibleFeatures;
+  }
+
+  return evenlyCapTileFeatures(visibleFeatures, bounds, TILE_POINT_RENDER_LIMIT);
 }
 
 function cachedTileFeaturesForViewport(cache, viewportBounds) {
@@ -999,7 +1094,8 @@ function syncMapDataAndVisibility(map, {
   nearbyCollection,
   nearbyCircleCollection,
   selectedFeature,
-  viewMode
+  viewMode,
+  bydelDisplayMode
 }) {
   if (!map?.isStyleLoaded()) return;
 
@@ -1022,8 +1118,10 @@ function syncMapDataAndVisibility(map, {
     map.setPaintProperty(LAYER_IDS.heatmapLocations, 'circle-color', heatmapPointColorExpression(heatmapStats));
   }
 
-  const markerVisibility = viewMode === 'markers' ? 'visible' : 'none';
-  const heatmapVisibility = viewMode === 'heatmap' ? 'visible' : 'none';
+  const bydelHeatmapActive = viewMode === 'heatmap' || (viewMode === 'markers' && bydelDisplayMode === 'heatmap');
+  const bydelClustersActive = viewMode === 'markers' && bydelDisplayMode !== 'heatmap';
+  const markerVisibility = bydelClustersActive ? 'visible' : 'none';
+  const heatmapVisibility = bydelHeatmapActive ? 'visible' : 'none';
   const tileVisibility = viewMode === 'tiles' ? 'visible' : 'none';
   const upgradeVisibility = viewMode === 'upgrade' ? 'visible' : 'none';
   const nearbyCircleVisibility = viewMode === 'tiles' ? 'none' : 'visible';
@@ -1386,6 +1484,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
   const hasFittedRef = useRef(false);
   const theme = useStore((state) => state.theme);
   const viewMode = useStore((state) => state.viewMode);
+  const bydelDisplayMode = useStore((state) => state.bydelDisplayMode);
   const nearbySearchEnabled = useStore((state) => state.nearbySearchEnabled);
   const radiusInMeters = useStore((state) => state.radiusInMeters);
   const setSelectedFeature = useStore((state) => state.setSelectedFeature);
@@ -1413,6 +1512,7 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
   const selectedFeatureRef = useRef(selectedFeature);
   const mapStyleUrlRef = useRef(mapStyleUrlForTheme(theme));
   const viewModeRef = useRef(viewMode);
+  const bydelDisplayModeRef = useRef(bydelDisplayMode);
   const nearbySearchEnabledRef = useRef(nearbySearchEnabled);
   const radiusInMetersRef = useRef(radiusInMeters);
   const selectedBydelRef = useRef(selectedBydel);
@@ -1457,6 +1557,10 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
   useEffect(() => {
     viewModeRef.current = viewMode;
   }, [viewMode]);
+
+  useEffect(() => {
+    bydelDisplayModeRef.current = bydelDisplayMode;
+  }, [bydelDisplayMode]);
 
   useEffect(() => {
     nearbySearchEnabledRef.current = nearbySearchEnabled;
@@ -1511,7 +1615,15 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
       missingBounds = [request.bounds];
     }
 
-    const missingRequestKey = missingBounds.map(boundsKey).join('|');
+    const requestBounds = splitMissingBoundsForTileRequests(missingBounds);
+
+    if (requestBounds.length === 0) {
+      tileRequestKeyRef.current = request.key;
+      setIsTileLoading(false);
+      return;
+    }
+
+    const missingRequestKey = requestBounds.map(boundsKey).join('|');
 
     if (missingRequestKey === tileRequestKeyRef.current) return;
 
@@ -1527,7 +1639,9 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
       request.bounds
     );
     try {
-      for (const bounds of missingBounds) {
+      const loadStates = [];
+
+      for (const bounds of requestBounds) {
         const boundsCacheKey = boundsKey(bounds);
         const cachedFeatures = readTileCache(tileCacheRef.current, boundsCacheKey);
 
@@ -1541,19 +1655,28 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
           continue;
         }
 
-        let loadedBoundsFeatures = [];
-        let cursor = null;
+        loadStates.push({
+          bounds,
+          boundsCacheKey,
+          loadedFeatures: [],
+          cursor: null,
+          completed: false
+        });
+      }
 
-        for (let index = 0; index < TILE_POINT_MAX_REQUESTS_PER_BOUNDS; index += 1) {
-          const limit = index === 0 ? TILE_POINT_FIRST_BATCH_LIMIT : TILE_POINT_BACKGROUND_BATCH_LIMIT;
+      for (let index = 0; index < TILE_POINT_MAX_REQUESTS_PER_BOUNDS; index += 1) {
+        const limit = index === 0 ? TILE_POINT_FIRST_BATCH_LIMIT : TILE_POINT_BACKGROUND_BATCH_LIMIT;
+
+        for (const state of loadStates) {
+          if (state.completed) continue;
 
           const payload = await fetchTilePointsBounds({
-            minLatitude: bounds.south,
-            minLongitude: bounds.west,
-            maxLatitude: bounds.north,
-            maxLongitude: bounds.east,
+            minLatitude: state.bounds.south,
+            minLongitude: state.bounds.west,
+            maxLatitude: state.bounds.north,
+            maxLongitude: state.bounds.east,
             limit,
-            ...tileCursorParams(cursor)
+            ...tileCursorParams(state.cursor)
           }, {
             signal: controller.signal
           });
@@ -1571,10 +1694,11 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
           const nextFeatures = normalized.features;
 
           if (nextFeatures.length === 0) {
-            break;
+            state.completed = true;
+            continue;
           }
 
-          loadedBoundsFeatures = mergeUniqueTileFeatures(loadedBoundsFeatures, nextFeatures);
+          state.loadedFeatures = mergeUniqueTileFeatures(state.loadedFeatures, nextFeatures);
           latestFeatures = capTileFeaturesForViewport(
             mergeUniqueTileFeatures(latestFeatures, nextFeatures),
             request.bounds
@@ -1582,14 +1706,17 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
           setTileFeatures(latestFeatures);
 
           if (!normalized.hasMore || !normalized.nextCursor) {
-            break;
+            state.completed = true;
+            continue;
           }
 
-          cursor = normalized.nextCursor;
+          state.cursor = normalized.nextCursor;
         }
+      }
 
-        writeTileCache(tileCacheRef.current, boundsCacheKey, loadedBoundsFeatures);
-        tileLoadedBoundsRef.current = rememberTileLoadedBounds(tileLoadedBoundsRef.current, bounds);
+      for (const state of loadStates) {
+        writeTileCache(tileCacheRef.current, state.boundsCacheKey, state.loadedFeatures);
+        tileLoadedBoundsRef.current = rememberTileLoadedBounds(tileLoadedBoundsRef.current, state.bounds);
       }
 
     } catch (error) {
@@ -1650,7 +1777,8 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
         nearbyCollection: nearbyCollectionRef.current,
         nearbyCircleCollection: nearbyCircleCollectionRef.current,
         selectedFeature: selectedFeatureRef.current,
-        viewMode: viewModeRef.current
+        viewMode: viewModeRef.current,
+        bydelDisplayMode: bydelDisplayModeRef.current
       });
       map.getSource(SOURCE_IDS.energyTiles)?.setData(tileCollectionRef.current);
 
@@ -1935,7 +2063,8 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
           nearbyCollection: nearbyCollectionRef.current,
           nearbyCircleCollection: nearbyCircleCollectionRef.current,
           selectedFeature: selectedFeatureRef.current,
-          viewMode: viewModeRef.current
+          viewMode: viewModeRef.current,
+          bydelDisplayMode: bydelDisplayModeRef.current
         });
         map.getSource(SOURCE_IDS.energyTiles)?.setData(tileCollectionRef.current);
       };
@@ -1960,9 +2089,10 @@ function MapView({ features, allFeaturesCount, selectedFeature, searchSelection,
       nearbyCollection,
       nearbyCircleCollection,
       selectedFeature,
-      viewMode
+      viewMode,
+      bydelDisplayMode
     });
-  }, [featureCollection, heatmapData, nearbyCollection, nearbyCircleCollection, selectedFeature, viewMode]);
+  }, [bydelDisplayMode, featureCollection, heatmapData, nearbyCollection, nearbyCircleCollection, selectedFeature, viewMode]);
 
   useEffect(() => {
     const map = mapRef.current;

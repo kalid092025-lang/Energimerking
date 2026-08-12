@@ -4,9 +4,13 @@ export const DEFAULT_ZOOM = 5.2;
 
 export const MAP_VIEW_MODES = [
   { value: 'markers', label: 'Bydeler i Oslo' },
-  { value: 'heatmap', label: 'Heatmap' },
   { value: 'tiles', label: 'Enkel bygg', isolated: true },
   { value: 'upgrade', label: 'Upgrade priority' }
+];
+
+export const BYDEL_DISPLAY_MODES = [
+  { value: 'clusters', label: 'Clusters' },
+  { value: 'heatmap', label: 'Heatmap' }
 ];
 
 export const SOURCE_IDS = {

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Database, Flame, Landmark, Layers, MapPin, PlugZap, TrendingUp } from 'lucide-react';
 import { fetchBydelStats } from '../services/api.js';
 import { useStore } from '../store/useStore.js';
-import { MAP_VIEW_MODES } from '../utils/constants.js';
+import { BYDEL_DISPLAY_MODES, MAP_VIEW_MODES } from '../utils/constants.js';
 import { OSLO_BYDELER, findBydel } from '../utils/osloBydeler.js';
 
 function RangeField({ label, min, max, value, onChange, suffix = '', step = 1, tooltip = '' }) {
@@ -159,6 +159,16 @@ const FILTER_MODE_ICONS = {
 const FILTER_MODE_ITEMS = MAP_VIEW_MODES.map((item) => ({
   ...item,
   Icon: FILTER_MODE_ICONS[item.value]
+}));
+
+const BYDEL_DISPLAY_ICONS = {
+  clusters: MapPin,
+  heatmap: Flame
+};
+
+const BYDEL_DISPLAY_ITEMS = BYDEL_DISPLAY_MODES.map((item) => ({
+  ...item,
+  Icon: BYDEL_DISPLAY_ICONS[item.value]
 }));
 
 function normalizeHeatingGrade(grade) {
@@ -325,14 +335,66 @@ function BydelStat({ label, value }) {
   );
 }
 
+function BydelStatsPanel({ bydelStats, externalBydelStats, externalBydelStatus }) {
+  return (
+    <div className="bydel-stats-grid">
+      <BydelStatSection Icon={Database}>Database stats</BydelStatSection>
+      <BydelStat label="Buildings" value={bydelStats.total.toLocaleString()} />
+      <BydelStat label="Avg energy" value={formatEnergy(bydelStats.averageEnergy)} />
+      <BydelStat label="Typical energy" value={formatEnergy(bydelStats.medianEnergy)} />
+      <BydelStat label="Common energy grade" value={bydelStats.mostCommonEnergyGrade} />
+      <BydelStat label="Common heating" value={bydelStats.mostCommonHeatingGrade} />
+      <BydelStat label="Avg build year" value={bydelStats.averageBuildYear || 'N/A'} />
+      <BydelStat label="Before 1980" value={`${bydelStats.oldBuildingShare}%`} />
+      <BydelStat label="High upgrade" value={`${bydelStats.highUpgradeShare}%`} />
+      {['A', 'B', 'C', 'D', 'E', 'F', 'G'].map((grade) => (
+        <BydelStat
+          key={grade}
+          label={`Energy ${grade}`}
+          value={formatCountShare(bydelStats.energyGradeCounts[grade], bydelStats.total)}
+        />
+      ))}
+      <BydelStat label="Heating green" value={formatCountShare(bydelStats.heatingGradeCounts.GREEN, bydelStats.total)} />
+      <BydelStat label="Heating yellow" value={formatCountShare(bydelStats.heatingGradeCounts.YELLOW, bydelStats.total)} />
+      <BydelStat label="Heating orange" value={formatCountShare(bydelStats.heatingGradeCounts.ORANGE, bydelStats.total)} />
+      <BydelStat label="Heating red" value={formatCountShare(bydelStats.heatingGradeCounts.RED, bydelStats.total)} />
+
+      <BydelStatSection
+        Icon={Landmark}
+        status={externalBydelStatus === 'loading' ? 'loading' : ''}
+      >
+        SSB / Oslo stats
+      </BydelStatSection>
+      <BydelStat label="Median price" value={formatCurrency(externalBydelStats?.housing?.medianHousePrice)} />
+      <BydelStat label="Price per m2" value={formatCurrency(externalBydelStats?.housing?.pricePerM2)} />
+      <BydelStat label="Price trend" value={formatPercent(externalBydelStats?.housing?.priceTrendPercent)} />
+      <BydelStat label="Median income" value={formatCurrency(externalBydelStats?.demographics?.medianHouseholdIncome)} />
+      <BydelStat label="Population" value={formatNumber(externalBydelStats?.demographics?.population)} />
+      <BydelStat label="Population growth" value={formatPercent(externalBydelStats?.demographics?.populationGrowthPercent)} />
+
+      <BydelStatSection Icon={PlugZap}>NOBIL stats</BydelStatSection>
+      <BydelStat label="Public chargers" value={formatNumber(externalBydelStats?.chargers?.publicChargers)} />
+      <BydelStat label="Fast chargers" value={formatNumber(externalBydelStats?.chargers?.fastChargers)} />
+      {externalBydelStatus === 'error' && (
+        <div className="bydel-stat-note">External bydel stats are unavailable.</div>
+      )}
+      {externalBydelStats?.chargers?.status && (
+        <div className="bydel-stat-note">{externalBydelStats.chargers.status}</div>
+      )}
+    </div>
+  );
+}
+
 function Filters() {
   const viewMode = useStore((state) => state.viewMode);
+  const bydelDisplayMode = useStore((state) => state.bydelDisplayMode);
   const allFeatures = useStore((state) => state.allFeatures);
   const selectedBydelId = useStore((state) => state.selectedBydelId);
   const filters = useStore((state) => state.filters);
   const filterBounds = useStore((state) => state.filterBounds);
   const radiusInMeters = useStore((state) => state.radiusInMeters);
   const setViewMode = useStore((state) => state.setViewMode);
+  const setBydelDisplayMode = useStore((state) => state.setBydelDisplayMode);
   const setSelectedBydelId = useStore((state) => state.setSelectedBydelId);
   const updateRange = useStore((state) => state.updateRange);
   const updateSelect = useStore((state) => state.updateSelect);
@@ -345,7 +407,7 @@ function Filters() {
   const bydelStats = useMemo(() => buildBydelStats(allFeatures), [allFeatures]);
   const [externalBydelStats, setExternalBydelStats] = useState(null);
   const [externalBydelStatus, setExternalBydelStatus] = useState('idle');
-  const [statsOpen, setStatsOpen] = useState(true);
+  const [statsOpen, setStatsOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(true);
   const bydelStatsCache = useRef(new Map());
 
@@ -458,6 +520,25 @@ function Filters() {
                 <div className="section-kicker">Bydeler i Oslo</div>
               </div>
             </div>
+            <div className="bydel-display-toggle" role="group" aria-label="Bydel map display">
+              {BYDEL_DISPLAY_ITEMS.map((item) => {
+                const Icon = item.Icon;
+                const isActive = bydelDisplayMode === item.value;
+
+                return (
+                  <button
+                    key={item.value}
+                    type="button"
+                    className={`bydel-display-button ${isActive ? 'active' : ''}`}
+                    onClick={() => setBydelDisplayMode(item.value)}
+                    aria-pressed={isActive}
+                  >
+                    <Icon className="bydel-display-icon" aria-hidden="true" strokeWidth={2.2} />
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
             <div className="bydel-select-wrap">
               <select
                 className="bydel-select"
@@ -476,70 +557,35 @@ function Filters() {
               <span>{selectedBydel.name}</span>
               <strong>{formatRadius(selectedBydel.radiusInMeters)} radius</strong>
             </div>
-            <div className="section-heading section-heading-compact">
-              <SectionToggle
-                controlsId="bydel-stats-panel"
-                isOpen={statsOpen}
-                onToggle={() => setStatsOpen((open) => !open)}
-              >
-                Stats
-              </SectionToggle>
-            </div>
-            <div
-              id="bydel-stats-panel"
-              className={`collapsible-region ${statsOpen ? 'is-open' : ''}`}
-              aria-hidden={!statsOpen}
-              inert={statsOpen ? undefined : ''}
-            >
-              <div className="bydel-stats-grid">
-                <BydelStatSection Icon={Database}>Database stats</BydelStatSection>
-                <BydelStat label="Buildings" value={bydelStats.total.toLocaleString()} />
-                <BydelStat label="Avg energy" value={formatEnergy(bydelStats.averageEnergy)} />
-                <BydelStat label="Typical energy" value={formatEnergy(bydelStats.medianEnergy)} />
-                <BydelStat label="Common energy grade" value={bydelStats.mostCommonEnergyGrade} />
-                <BydelStat label="Common heating" value={bydelStats.mostCommonHeatingGrade} />
-                <BydelStat label="Avg build year" value={bydelStats.averageBuildYear || 'N/A'} />
-                <BydelStat label="Before 1980" value={`${bydelStats.oldBuildingShare}%`} />
-                <BydelStat label="High upgrade" value={`${bydelStats.highUpgradeShare}%`} />
-                {['A', 'B', 'C', 'D', 'E', 'F', 'G'].map((grade) => (
-                  <BydelStat
-                    key={grade}
-                    label={`Energy ${grade}`}
-                    value={formatCountShare(bydelStats.energyGradeCounts[grade], bydelStats.total)}
-                  />
-                ))}
-                <BydelStat label="Heating green" value={formatCountShare(bydelStats.heatingGradeCounts.GREEN, bydelStats.total)} />
-                <BydelStat label="Heating yellow" value={formatCountShare(bydelStats.heatingGradeCounts.YELLOW, bydelStats.total)} />
-                <BydelStat label="Heating orange" value={formatCountShare(bydelStats.heatingGradeCounts.ORANGE, bydelStats.total)} />
-                <BydelStat label="Heating red" value={formatCountShare(bydelStats.heatingGradeCounts.RED, bydelStats.total)} />
-
-                <BydelStatSection
-                  Icon={Landmark}
-                  status={externalBydelStatus === 'loading' ? 'loading' : ''}
-                >
-                  SSB / Oslo stats
-                </BydelStatSection>
-                <BydelStat label="Median price" value={formatCurrency(externalBydelStats?.housing?.medianHousePrice)} />
-                <BydelStat label="Price per m2" value={formatCurrency(externalBydelStats?.housing?.pricePerM2)} />
-                <BydelStat label="Price trend" value={formatPercent(externalBydelStats?.housing?.priceTrendPercent)} />
-                <BydelStat label="Median income" value={formatCurrency(externalBydelStats?.demographics?.medianHouseholdIncome)} />
-                <BydelStat label="Population" value={formatNumber(externalBydelStats?.demographics?.population)} />
-                <BydelStat label="Population growth" value={formatPercent(externalBydelStats?.demographics?.populationGrowthPercent)} />
-
-                <BydelStatSection Icon={PlugZap}>NOBIL stats</BydelStatSection>
-                <BydelStat label="Public chargers" value={formatNumber(externalBydelStats?.chargers?.publicChargers)} />
-                <BydelStat label="Fast chargers" value={formatNumber(externalBydelStats?.chargers?.fastChargers)} />
-                {externalBydelStatus === 'error' && (
-                  <div className="bydel-stat-note">External bydel stats are unavailable.</div>
-                )}
-                {externalBydelStats?.chargers?.status && (
-                  <div className="bydel-stat-note">{externalBydelStats.chargers.status}</div>
-                )}
-              </div>
-            </div>
           </div>
         )}
       </section>
+
+      {viewMode === 'markers' && (
+        <section className="filter-card stats-card">
+          <div className="section-heading">
+            <SectionToggle
+              controlsId="bydel-stats-panel"
+              isOpen={statsOpen}
+              onToggle={() => setStatsOpen((open) => !open)}
+            >
+              Stats
+            </SectionToggle>
+          </div>
+          <div
+            id="bydel-stats-panel"
+            className={`collapsible-region ${statsOpen ? 'is-open' : ''}`}
+            aria-hidden={!statsOpen}
+            inert={statsOpen ? undefined : ''}
+          >
+            <BydelStatsPanel
+              bydelStats={bydelStats}
+              externalBydelStats={externalBydelStats}
+              externalBydelStatus={externalBydelStatus}
+            />
+          </div>
+        </section>
+      )}
 
       <section className="filter-card">
         <div className="section-heading">

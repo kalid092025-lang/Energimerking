@@ -11,6 +11,7 @@ export const useStore = create((set) => ({
   isLoading: false,
   error: '',
   viewMode: 'markers',
+  bydelDisplayMode: 'clusters',
   selectedBydelId: 'gamle-oslo',
   nearbySearchEnabled: false,
   radiusInMeters: 5000,
@@ -44,7 +45,13 @@ export const useStore = create((set) => ({
   setSearchQuery: (searchQuery) => set({ searchQuery }),
   setAllFeatures: (allFeatures) => set({ allFeatures }),
   setSelectedFeature: (selectedFeature) => set({ selectedFeature }),
-  setViewMode: (viewMode) => set({ viewMode }),
+  setViewMode: (viewMode) =>
+    set(() => (
+      viewMode === 'heatmap'
+        ? { viewMode: 'markers', bydelDisplayMode: 'heatmap' }
+        : { viewMode }
+    )),
+  setBydelDisplayMode: (bydelDisplayMode) => set({ bydelDisplayMode }),
   setSelectedBydelId: (selectedBydelId) => set({ selectedBydelId, selectedFeature: null }),
   toggleNearbySearch: () =>
     set((state) => {
