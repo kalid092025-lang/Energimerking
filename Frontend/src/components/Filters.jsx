@@ -576,7 +576,7 @@ function Filters() {
             id="bydel-stats-panel"
             className={`collapsible-region ${statsOpen ? 'is-open' : ''}`}
             aria-hidden={!statsOpen}
-            inert={statsOpen ? undefined : ''}
+            inert={!statsOpen}
           >
             <BydelStatsPanel
               bydelStats={bydelStats}
@@ -605,7 +605,7 @@ function Filters() {
           id="filters-fields-panel"
           className={`collapsible-region ${filtersOpen ? 'is-open' : ''}`}
           aria-hidden={!filtersOpen}
-          inert={filtersOpen ? undefined : ''}
+          inert={!filtersOpen}
         >
           <div className="filters-fields">
             <RangeField
