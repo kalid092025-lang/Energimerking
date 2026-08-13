@@ -7,6 +7,7 @@ import { useStore } from '../store/useStore.js';
 import { buildFeatureCollection, buildNearbyCircleGeoJson, buildNearbyGeoJson } from '../utils/geo.js';
 import { normalizeGeoJson } from '../utils/filtering.js';
 import { normalizeTilePointsPayload, tileCursorParams } from '../utils/tilePoints.js';
+import { buildUpgradeInsights } from '../utils/upgradeInsights.js';
 import {
   DARK_MAP_STYLE_URL,
   DEFAULT_CENTER,
@@ -204,33 +205,32 @@ function scoreBar(label, score) {
   `;
 }
 
-function upgradeRecommendations(properties) {
-  const energyGrade = String(properties.energikarakter || '').trim().toUpperCase();
-  const heatingGrade = String(properties.oppvarmingskarakter || '').trim().toUpperCase();
-  const energyUse = Number(properties.energibruk_kwh_m2 ?? properties.beregnetLevertEnergiTotaltkWhm2);
-  const recommendations = [];
+function upgradeDriverRows(drivers) {
+  return drivers
+    .map((item) => `
+      <div class="upgrade-driver driver-${escapeHtml(item.tone)}">
+        <strong>${escapeHtml(item.label)}</strong>
+        <span>${escapeHtml(item.detail)}</span>
+      </div>
+    `)
+    .join('');
+}
 
-  if (['E', 'F', 'G'].includes(energyGrade) || energyUse >= 300) {
-    recommendations.push('Check insulation, windows, ventilation heat recovery, and air leakage first.');
-  } else if (['C', 'D'].includes(energyGrade) || energyUse >= 180) {
-    recommendations.push('Look for medium upgrades: attic insulation, window improvements, and smarter ventilation.');
-  } else {
-    recommendations.push('Energy performance looks relatively strong; focus on smaller efficiency wins.');
-  }
+function upgradeRecommendationItems(recommendations) {
+  return recommendations
+    .map((item) => `<li>${escapeHtml(item)}</li>`)
+    .join('');
+}
 
-  if (['RED', 'ORANGE'].includes(heatingGrade)) {
-    recommendations.push('Prioritize heating upgrades such as heat pump, district heating, or another renewable/non-direct-electric source.');
-  } else if (heatingGrade === 'YELLOW') {
-    recommendations.push('Heating is partly renewable; compare whether a larger renewable share would improve the certificate.');
-  } else {
-    recommendations.push('Heating grade is already strong; focus more on reducing heat loss through insulation, windows, roof, and walls.');
-  }
-
-  if (Number(properties.byggeaar) && Number(properties.byggeaar) < 1987) {
-    recommendations.push('Older building year suggests checking insulation, windows, roof, and wall heat loss before expensive system changes.');
-  }
-
-  return recommendations;
+function upgradeDataRows(dataUsed) {
+  return dataUsed
+    .map((item) => `
+      <div class="upgrade-data-item ${item.missing ? 'is-missing' : ''}">
+        <span>${escapeHtml(item.label)}</span>
+        <strong>${escapeHtml(displayValue(item.value, 'N/A'))}</strong>
+      </div>
+    `)
+    .join('');
 }
 
 function upgradePopupHtml(properties) {
@@ -238,9 +238,7 @@ function upgradePopupHtml(properties) {
   const energyUse = properties.beregnetLevertEnergiTotaltkWhm2 ?? properties.energibruk_kwh_m2;
   const score = Math.max(0, Math.min(100, Number(properties.upgradeScore) || 0));
   const priority = properties.upgradePriority || priorityLabel(score);
-  const recommendations = upgradeRecommendations(properties)
-    .map((item) => `<li>${escapeHtml(item)}</li>`)
-    .join('');
+  const insights = buildUpgradeInsights(properties);
 
   return `
     <div class="popup-card popup-card-upgrade">
@@ -248,11 +246,22 @@ function upgradePopupHtml(properties) {
         <div class="popup-heading">
           <div class="popup-kicker">Upgrade priority</div>
           <div class="popup-title">${address}</div>
-          <div class="popup-subtitle">Estimated score based on grade, heating, energy use, and age.</div>
+          <div class="popup-subtitle">Heuristic estimate from certificate, heating, energy use, age, and data completeness.</div>
         </div>
         <div class="priority-badge ${priorityClass(score)}">
           <span>${escapeHtml(priority)}</span>
           <strong>${score}</strong>
+        </div>
+      </div>
+
+      <div class="upgrade-confidence">
+        <div>
+          <div class="upgrade-confidence-label">Estimate confidence</div>
+          <strong>${escapeHtml(insights.confidence.label)}</strong>
+          <span>${escapeHtml(insights.confidence.copy)}</span>
+        </div>
+        <div class="upgrade-confidence-pill confidence-${escapeHtml(insights.confidence.level)}">
+          ${escapeHtml(insights.confidence.label)}
         </div>
       </div>
 
@@ -269,9 +278,23 @@ function upgradePopupHtml(properties) {
         ${scoreBar('Heating upgrade need', properties.heatingUpgradeScore)}
       </div>
 
+      <div class="upgrade-section">
+        <div class="popup-kicker">Main drivers</div>
+        <div class="upgrade-drivers">
+          ${upgradeDriverRows(insights.drivers)}
+        </div>
+      </div>
+
       <div class="upgrade-actions">
-        <div class="popup-kicker">What to look at</div>
-        <ul>${recommendations}</ul>
+        <div class="popup-kicker">Recommended checks</div>
+        <ul>${upgradeRecommendationItems(insights.recommendations)}</ul>
+      </div>
+
+      <div class="upgrade-section">
+        <div class="popup-kicker">Data used</div>
+        <div class="upgrade-data-grid">
+          ${upgradeDataRows(insights.dataUsed)}
+        </div>
       </div>
     </div>
   `;
@@ -669,7 +692,7 @@ function MapLegend({ heatmapStats }) {
           </div>
         ) : viewMode === 'upgrade' ? (
           <>
-            <div className="legend-copy">Upgrade priority score</div>
+            <div className="legend-copy">Heuristic priority from existing certificate data. Building cards explain the score.</div>
             <div className="legend-gradient priority-gradient" />
             <div className="legend-scale">
               <span>
@@ -678,7 +701,7 @@ function MapLegend({ heatmapStats }) {
               </span>
               <span>
                 <strong>High</strong>
-                <small>fix first</small>
+                <small>inspect first</small>
               </span>
             </div>
           </>

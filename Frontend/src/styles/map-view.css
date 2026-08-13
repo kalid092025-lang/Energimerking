@@ -11,7 +11,7 @@
 
 .map-floating {
   position: absolute;
-  right: 20px;
+  right: 10px;
   bottom: 108px;
   z-index: 20;
   display: flex;
@@ -427,9 +427,212 @@
 }
 
 .popup-card-upgrade {
+  max-width: min(560px, calc(100vw - 32px));
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-right: 14px;
+}
+
+.popup-card-upgrade .popup-metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.upgrade-confidence {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 12px 0 0;
+  border-top: 1px solid #e6eaf0;
+}
+
+.upgrade-confidence-label {
+  margin-bottom: 3px;
+  color: #69707a;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.upgrade-confidence strong {
+  display: block;
+  color: #111827;
+  font-size: 0.94rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.upgrade-confidence span {
+  display: block;
+  margin-top: 3px;
+  color: #69707a;
+  font-size: 0.76rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.upgrade-confidence-pill {
+  flex: 0 0 auto;
+  padding: 5px 7px;
+  border-radius: 5px;
+  font-size: 0.66rem;
+  font-weight: 850;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.confidence-high {
+  background: rgba(34, 197, 94, 0.14);
+  color: #166534;
+}
+
+.confidence-medium {
+  background: rgba(245, 158, 11, 0.16);
+  color: #92400e;
+}
+
+.confidence-low {
+  background: rgba(100, 116, 139, 0.16);
+  color: #475569;
+}
+
+.upgrade-section {
+  margin-top: 16px;
+}
+
+.upgrade-drivers {
+  display: grid;
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.upgrade-driver {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px 10px 9px 12px;
+  border-left: 3px solid #94a3b8;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.upgrade-driver strong {
+  color: #111827;
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1.22;
+}
+
+.upgrade-driver span {
+  color: #4b5563;
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.driver-high {
+  border-left-color: #dc2626;
+}
+
+.driver-medium {
+  border-left-color: #f59e0b;
+}
+
+.driver-low {
+  border-left-color: #22c55e;
+}
+
+.driver-missing {
+  border-left-color: #64748b;
+}
+
+.upgrade-data-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+  margin-top: 8px;
+  border-top: 1px solid #e6eaf0;
+}
+
+.upgrade-data-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 7px 0;
+  border-bottom: 1px solid #eef2f6;
+}
+
+.upgrade-data-item span {
+  flex: 0 0 auto;
+  color: #69707a;
+  font-size: 0.7rem;
+  font-weight: 750;
+  line-height: 1.25;
+}
+
+.upgrade-data-item strong {
+  min-width: 0;
+  color: #1f2933;
+  font-size: 0.74rem;
+  font-weight: 800;
+  line-height: 1.25;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.upgrade-data-item.is-missing strong {
+  color: #8b95a1;
+  font-weight: 650;
+}
+
+.theme-dark .upgrade-confidence,
+.theme-dark .upgrade-data-grid {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.theme-dark .upgrade-confidence-label,
+.theme-dark .upgrade-confidence span,
+.theme-dark .upgrade-driver span,
+.theme-dark .upgrade-data-item span {
+  color: #cbd5e1;
+}
+
+.theme-dark .upgrade-confidence strong,
+.theme-dark .upgrade-driver strong,
+.theme-dark .upgrade-data-item strong {
+  color: #f8fafc;
+}
+
+.theme-dark .upgrade-driver {
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.theme-dark .upgrade-data-item {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.theme-dark .upgrade-data-item.is-missing strong {
+  color: #aeb8c7;
+}
+
+.theme-dark .confidence-high {
+  background: rgba(34, 197, 94, 0.2);
+  color: #bbf7d0;
+}
+
+.theme-dark .confidence-medium {
+  background: rgba(245, 158, 11, 0.22);
+  color: #fde68a;
+}
+
+.theme-dark .confidence-low {
+  background: rgba(148, 163, 184, 0.2);
+  color: #e2e8f0;
 }
 
 .popup-header {
@@ -1164,7 +1367,7 @@
 
 @media (max-width: 900px) {
   .map-floating {
-    right: 12px;
+    right: 10px;
     bottom: 96px;
   }
 }
@@ -1182,6 +1385,16 @@
 
   .popup-metrics {
     grid-template-columns: 1fr;
+  }
+
+  .popup-card-upgrade .popup-metrics,
+  .upgrade-data-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .upgrade-confidence {
+    flex-direction: column;
+    gap: 8px;
   }
 
   .marker-popup {
